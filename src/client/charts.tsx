@@ -31,6 +31,11 @@ export function modelColor(model: string): string {
   return MODEL_COLORS[hash % MODEL_COLORS.length];
 }
 
+/**
+ * Token totals as reported by the official dashboard: cache-hit input +
+ * uncached input + output (the platform's "Tokens" card sums all three
+ * component columns).
+ */
 export function modelTokens(stat: ModelStat | undefined): number {
   if (!stat) return 0;
   return (stat.input ?? 0) + (stat.cacheRead ?? 0) + (stat.output ?? 0);
@@ -163,28 +168,38 @@ export function StackedBarChart({
     max = Math.max(max, total);
     buckets.push({ key, label: dayLabel(date), values, total });
   }
+  // Dense views: nowrap labels can't shrink, so label every 3rd day (anchored
+  // to the last bucket so today always keeps a label) and skip per-column
+  // value text — the hover tooltip still shows the exact number. Columns
+  // without a label keep an invisible spacer so bars stay on a shared baseline.
+  const labelEvery = days > 14 ? 3 : 1;
+  const labelAnchor = (days - 1) % labelEvery;
+  const showValues = days <= 14;
   return (
-    <div className="bm-chart bm-stacked">
-      {buckets.map((bucket) => (
-        <div
-          className="bm-chart-col"
-          key={bucket.key}
-          data-tip={`${bucket.label}  ${fmtTokens(bucket.total)} tokens`}
-        >
-          <span className="bm-chart-value">{bucket.total > 0 ? fmtTokens(bucket.total) : ""}</span>
-          <span className="bm-stack" style={{ height: `${max > 0 ? Math.max(4, (bucket.total / max) * 100) : 2}%` }}>
-            {bucket.values.map((value, index) =>
-              value > 0 ? (
-                <i
-                  key={modelIds[index]}
-                  style={{ height: `${(value / Math.max(1, bucket.total)) * 100}%`, background: modelColor(modelIds[index]) }}
-                />
-              ) : null,
-            )}
-          </span>
-          <span className="bm-chart-label">{bucket.label}</span>
-        </div>
-      ))}
+    <div className="bm-chart bm-stacked" data-dense={days > 14 || undefined}>
+      {buckets.map((bucket, index) => {
+        const showLabel = index % labelEvery === labelAnchor;
+        return (
+          <div
+            className="bm-chart-col"
+            key={bucket.key}
+            data-tip={`${bucket.label}  ${fmtTokens(bucket.total)} tokens`}
+          >
+            {showValues && <span className="bm-chart-value">{bucket.total > 0 ? fmtTokens(bucket.total) : ""}</span>}
+            <span className="bm-stack" style={{ height: `${max > 0 ? Math.max(4, (bucket.total / max) * 100) : 2}%` }}>
+              {bucket.values.map((value, index) =>
+                value > 0 ? (
+                  <i
+                    key={modelIds[index]}
+                    style={{ height: `${(value / Math.max(1, bucket.total)) * 100}%`, background: modelColor(modelIds[index]) }}
+                  />
+                ) : null,
+              )}
+            </span>
+            <span className="bm-chart-label">{showLabel ? bucket.label : "\u00A0"}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -199,48 +199,72 @@ export function SidebarWidget({ wide, rpc }: { wide: boolean; rpc: RpcCall }) {
         }}
         title={i18n("name")}
       >
-        {display?.showPeak !== false && (
-          <span className="bm-trend" data-status={peak} data-tip={peak === "peak" ? i18n("peak") : i18n("offpeak")}>
-            <i />{peak === "peak" ? i18n("peakShort") : i18n("offpeakShort")}
-          </span>
-        )}
-        {!wide && <span className="bm-pill-badge" aria-hidden>¥</span>}
-        <span className="bm-pill-main">
-          {display?.showBalance !== false && (
-            <span
-              className="bm-primary"
-              data-warn={anyLimitExceeded || undefined}
-              data-critical={anyBlocked || undefined}
-            >
-              {balanceLabel}
+        {wide ? (
+          <>
+            {display?.showPeak !== false && (
+              <span className="bm-trend" data-status={peak} data-tip={peak === "peak" ? i18n("peak") : i18n("offpeak")}>
+                <i />{peak === "peak" ? i18n("peakShort") : i18n("offpeakShort")}
+              </span>
+            )}
+            <span className="bm-pill-main">
+              {display?.showBalance !== false && (
+                <span
+                  className="bm-primary"
+                  data-warn={anyLimitExceeded || undefined}
+                  data-critical={anyBlocked || undefined}
+                >
+                  {balanceLabel}
+                </span>
+              )}
+              {display?.showToday !== false && (
+                <span className="bm-secondary">
+                  {i18n("today")} {currency}{fmtMoney(todayCost)}
+                  {showRemaining && limitRow ? ` · ${fmtMoney(limitRow.remaining)} / ${fmtMoney(limitRow.value)}` : ""}
+                </span>
+              )}
             </span>
-          )}
-          {wide && display?.showToday !== false && (
-            <span className="bm-secondary">
-              {i18n("today")} {currency}{fmtMoney(todayCost)}
-              {showRemaining && limitRow ? ` · ${fmtMoney(limitRow.remaining)} / ${fmtMoney(limitRow.value)}` : ""}
-            </span>
-          )}
-        </span>
-        {wide && display?.showRefresh !== false && (
-          <button
-            type="button"
-            className="bm-iconbtn"
-            disabled={spinning}
-            aria-label={i18n("refresh")}
-            title={i18n("refresh")}
-            onClick={(event) => {
-              event.stopPropagation();
-              void doRefresh();
-            }}
-          >
-            <RefreshIcon spinning={spinning} />
-          </button>
-        )}
-        {showRemaining && limitRow && (
-          <span className="bm-strip" data-warn={limitRow.exceeded || undefined} data-critical={(limitRow.action === "block" && limitRow.exceeded) || undefined}>
-            <i style={{ width: `${Math.min(100, Math.round(limitRow.progress * 100))}%` }} />
-          </span>
+            {display?.showRefresh !== false && (
+              <button
+                type="button"
+                className="bm-iconbtn"
+                disabled={spinning}
+                aria-label={i18n("refresh")}
+                title={i18n("refresh")}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void doRefresh();
+                }}
+              >
+                <RefreshIcon spinning={spinning} />
+              </button>
+            )}
+            {showRemaining && limitRow && (
+              <span className="bm-strip" data-warn={limitRow.exceeded || undefined} data-critical={(limitRow.action === "block" && limitRow.exceeded) || undefined}>
+                <i style={{ width: `${Math.min(100, Math.round(limitRow.progress * 100))}%` }} />
+              </span>
+            )}
+          </>
+        ) : (
+          <>
+            {display?.showPeak !== false && (
+              <span
+                className="bm-rail-trend"
+                data-status={peak}
+                title={peak === "peak" ? i18n("peak") : i18n("offpeak")}
+              >
+                <i />
+              </span>
+            )}
+            {display?.showBalance !== false && (
+              <span
+                className="bm-rail-balance"
+                data-warn={anyLimitExceeded || undefined}
+                data-critical={anyBlocked || undefined}
+              >
+                {balanceLabel}
+              </span>
+            )}
+          </>
         )}
       </div>
       {open && anchor && overview && (
@@ -647,7 +671,8 @@ function FloatWindow({
             {todayModels.map(({ id, stat }) => {
               const tokens = modelTokens(stat);
               const share = overview.totals.cost > 0 ? Math.min(1, stat.cost / overview.totals.cost) : 0;
-              const cacheRate = tokens > 0 ? (stat.cacheRead ?? 0) / tokens : 0;
+              const cache = stat.cacheRead ?? 0;
+              const cacheRate = tokens > 0 ? Math.min(1, cache / tokens) : 0;
               return (
                 <Card key={id}>
                   <div className="bm-card-head">

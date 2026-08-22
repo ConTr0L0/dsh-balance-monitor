@@ -53,8 +53,8 @@ dsh plugin --profile web add dsh-balance-monitor
 
 ## 成本计算说明
 
-- 数据来源：DSH 会话日志（`$DSH_HOME/sessions/.../session.jsonl.zstd`），按次增量解析，不重复计费。
-- 每次 LLM 请求：未命中输入按 `input` 单价、输出按 `output` 单价（每百万 token）；缓存读按 DeepSeek 平台「消耗」口径计费（与平台每日账单一致；`lib/config.js` 的 `CACHE_HIT_CHARGED` 开关可切换为按官方发布命中价计费）。
+- 数据来源：DSH 会话日志（`$DSH_HOME/sessions/.../session.jsonl.zstd`），按次增量解析。DSH 会把同一会话内容写入多个 session 文件（父/子会话副本），插件按 `assistant/message` 的唯一 `message.id` 去重后再计费。
+- 每次 LLM 请求：未命中输入按 `input` 单价、缓存命中按 `cacheHit` 单价（0.1 元/百万）、输出按 `output` 单价（每百万 token）。该口径已与 DeepSeek 平台每日账单逐项对账验证（2026-08-22：flash 误差 0.3%，总量误差约 5%，残差来自失败/中断请求的不可见计费）。
 - 请求发生时间落在高峰窗口内按价目表原价，否则乘以「谷时折扣」（0.5）。
 - **价目表由插件每日自动验证**（`lib/pricing.js`，源：DeepSeek 官方文档页），未知模型走内置默认价（flash 价），无需手动配置。
 
