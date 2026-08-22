@@ -424,10 +424,24 @@ function FloatWindow({
     </div>
   );
 
+  /** Group total = this session + all descendants (recursive). */
+  const groupTotal = (id: string): { cost: number; requests: number } => {
+    const self = byId.get(id);
+    let cost = self?.cost ?? 0;
+    let requests = self?.requests ?? 0;
+    for (const child of childrenOf(id)) {
+      const sub = groupTotal(child.id);
+      cost += sub.cost;
+      requests += sub.requests;
+    }
+    return { cost, requests };
+  };
+
   const renderGroup = (root: SessionRow) => {
     const children = childrenOf(root.id);
     const hasChildren = children.length > 0;
     const isOpen = expanded.has(root.id);
+    const total = groupTotal(root.id);
     return (
       <div className="bm-session-group" key={root.id}>
         <div
@@ -449,11 +463,11 @@ function FloatWindow({
           <div className="bm-list-row-main">
             <span className="bm-list-title">{root.title || root.id.slice(0, 8)}</span>
             <span className="bm-list-sub">
-              {root.lastEvent ? new Date(root.lastEvent).toLocaleString() : ""} · {i18n("reqLabel")} {root.requests} {i18n("req")}
+              {root.lastEvent ? new Date(root.lastEvent).toLocaleString() : ""} · {i18n("reqLabel")} {total.requests} {i18n("req")}
               {hasChildren ? ` · ${children.length} ${i18n("subSessions")}` : ""}
             </span>
           </div>
-          <span className="bm-list-cost">{currency}{fmtMoney(root.cost)}</span>
+          <span className="bm-list-cost">{currency}{fmtMoney(total.cost)}</span>
         </div>
         {isOpen && (
           <div className="bm-session-children">
@@ -469,6 +483,8 @@ function FloatWindow({
     <div
       className="bm-popover"
       data-size={size.w < 350 ? "narrow" : size.w < 460 ? "mid" : "wide"}
+      data-dragging={dragging || undefined}
+      data-resizing={resizing || undefined}
       style={{ left: pos.x, top: pos.y, width: size.w, height: size.h }}
       role="dialog"
       aria-label={i18n("name")}
@@ -530,6 +546,10 @@ function FloatWindow({
                 <div><span>{i18n("quotaTotal")}</span><strong>{currency}{fmtMoney(providerTotal)}</strong></div>
                 <div><span>{i18n("quotaSpent")}</span><strong>{currency}{fmtMoney(overview.totals.cost)}</strong></div>
               </div>
+              <div className="bm-row">
+                <span>{i18n("totalCost")}</span>
+                <span>{currency}{fmtMoney(overview.totals.cost)} · {i18n("reqLabel")} {overview.totals.requests} {i18n("req")}</span>
+              </div>
               <div className="bm-quota-track">
                 <i style={{ width: `${Math.round(quotaProgress * 100)}%` }} />
               </div>
@@ -582,10 +602,6 @@ function FloatWindow({
         )}
 
         <Card>
-          <div className="bm-row">
-            <span>{i18n("totalCost")}</span>
-            <span>{currency}{fmtMoney(overview.totals.cost)} · {i18n("reqLabel")} {overview.totals.requests} {i18n("req")}</span>
-          </div>
           <div className="bm-row">
             <span>{i18n("today")}</span>
             <span>{currency}{fmtMoney(today.cost)} · {i18n("reqLabel")} {today.requests} {i18n("req")}</span>

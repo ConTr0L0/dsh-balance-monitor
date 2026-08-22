@@ -142,6 +142,7 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
     setSaveState("error");
   };
 
+  /** Full draft refresh — initial mount and explicit reload only. */
   const load = async () => {
     try {
       const config = await rpc<ConfigValue>("config/get");
@@ -158,9 +159,27 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
     }
   };
 
+  /** Lightweight refresh after a write: revision/secrets/stats only —
+   *  the draft KEEPS the user's optimistic values. A read-back race or a
+   *  re-render can therefore never visually "revert" a just-saved toggle.
+   *  (The server write itself is authoritative and verified separately.) */
+  const refreshAfterWrite = async () => {
+    try {
+      const config = await rpc<ConfigValue>("config/get");
+      setSecrets(config.secrets ?? []);
+      setRevision(config.revision);
+      const overviewData = await rpc<Overview>("overview");
+      setOverview(overviewData);
+      const historyData = await rpc<History>("history");
+      setHistory(historyData);
+    } catch (error) {
+      showError(error);
+    }
+  };
+
   useEffect(() => {
     void load();
-    const poll = window.setInterval(() => void load(), 60_000);
+    const poll = window.setInterval(() => void refreshAfterWrite(), 60_000);
     return () => {
       window.clearInterval(poll);
       if (saveTimer.current !== null) clearTimeout(saveTimer.current);
@@ -184,10 +203,12 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
     if (!draft) return;
     try {
       await rpc("config/patch", { patch: toPatch(draft), revision });
-      await load();
+      await refreshAfterWrite();
       setSaveState("saved");
     } catch (error) {
+      // A conflict or validation failure: re-sync the draft with the server.
       showError(error);
+      void load();
     }
   };
 
@@ -202,7 +223,7 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
         .then(async () => {
           setSaveState("saving");
           await rpc("config/setSecret", { path: ["providers", provider, "apiKey"], value, revision });
-          await load();
+          await refreshAfterWrite();
           setSaveState("saved");
         })
         .catch((error) => showError(error));
