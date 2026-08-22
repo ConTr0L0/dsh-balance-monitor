@@ -1,5 +1,7 @@
 # dsh-balance-monitor
 
+[English](README_EN.md) | 中文
+
 DSH（DeepSeek Harness）插件：在左侧任务栏实时显示 API 账户余额，支持多平台余额检测、峰谷计价、会话/每日消耗统计与可配置的消耗上限。同时适配 Web 端与桌面端（两者运行同一份代码）。
 
 ## 功能
@@ -32,7 +34,7 @@ DSH（DeepSeek Harness）插件：在左侧任务栏实时显示 API 账户余�
 ### 方式一：从 GitHub（推荐）
 
 ```bash
-dsh plugin --profile web add github:你的用户名/dsh-balance-monitor
+dsh plugin --profile web add github:ConTr0L0/dsh-balance-monitor
 ```
 
 ### 方式二：本地开发（link）
