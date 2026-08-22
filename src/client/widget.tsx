@@ -387,23 +387,45 @@ function FloatWindow({
   };
 
   const byId = new Map(sessions.map((session) => [session.id, session]));
-  const roots = sessions
-    .filter((session) => !session.parentSession || !byId.has(session.parentSession))
-    .sort((a, b) => (b.lastEvent ?? 0) - (a.lastEvent ?? 0));
   const childrenOf = (id: string) =>
     sessions
       .filter((session) => session.parentSession === id)
       .sort((a, b) => (b.lastEvent ?? 0) - (a.lastEvent ?? 0));
-  const toggleExpand = (id: string) => {
+  const toggleExpand = (key: string) => {
     setExpanded((previous) => {
       const next = new Set(previous);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   };
-  const visibleRoots = showAllSessions ? roots : roots.slice(0, 6);
-  const totalGroups = roots.length;
+
+  /**
+   * "Same session" grouping: DSH auto-titles each session from its first
+   * message, so repeated runs of one topic share one title. Root sessions
+   * are grouped BY TITLE (sum shown on the group row; expand to see each
+   * session's spend); sessions carrying a parentSession stay nested under
+   * their lineage instead.
+   */
+  const UNTITLED = i18n("untitled");
+  const groupMap = new Map<string, SessionRow[]>();
+  for (const session of sessions) {
+    if (session.parentSession && byId.has(session.parentSession)) continue;
+    const key = session.title || UNTITLED;
+    const list = groupMap.get(key) ?? [];
+    list.push(session);
+    groupMap.set(key, list);
+  }
+  const titleGroups = [...groupMap.entries()]
+    .map(([title, list]) => {
+      const sorted = [...list].sort((a, b) => (b.lastEvent ?? 0) - (a.lastEvent ?? 0));
+      const cost = sorted.reduce((sum, s) => sum + s.cost, 0);
+      const requests = sorted.reduce((sum, s) => sum + s.requests, 0);
+      return { key: `title:${title}`, title, list: sorted, cost, requests, lastEvent: sorted[0]?.lastEvent ?? 0 };
+    })
+    .sort((a, b) => b.lastEvent - a.lastEvent);
+  const visibleGroups = showAllSessions ? titleGroups : titleGroups.slice(0, 6);
+  const totalGroups = titleGroups.length;
   const now = new Date();
   const isCurrentMonth = year === now.getFullYear() && month === now.getMonth();
 
@@ -425,36 +447,22 @@ function FloatWindow({
     </div>
   );
 
-  /** Group total = this session + all descendants (recursive). */
-  const groupTotal = (id: string): { cost: number; requests: number } => {
-    const self = byId.get(id);
-    let cost = self?.cost ?? 0;
-    let requests = self?.requests ?? 0;
-    for (const child of childrenOf(id)) {
-      const sub = groupTotal(child.id);
-      cost += sub.cost;
-      requests += sub.requests;
-    }
-    return { cost, requests };
-  };
-
-  const renderGroup = (root: SessionRow) => {
-    const children = childrenOf(root.id);
-    const hasChildren = children.length > 0;
-    const isOpen = expanded.has(root.id);
-    const total = groupTotal(root.id);
+  /** One session row; expands to its detail + lineage children. */
+  const renderSessionRow = (session: SessionRow) => {
+    const children = childrenOf(session.id);
+    const isOpen = expanded.has(session.id);
     return (
-      <div className="bm-session-group" key={root.id}>
+      <div className="bm-session-group" key={session.id}>
         <div
           className="bm-list-row"
           role="button"
           tabIndex={0}
-          onClick={() => (hasChildren ? toggleExpand(root.id) : undefined)}
+          onClick={() => toggleExpand(session.id)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && hasChildren) toggleExpand(root.id);
+            if (event.key === "Enter") toggleExpand(session.id);
           }}
         >
-          {hasChildren ? (
+          {children.length > 0 ? (
             <svg className="bm-session-chevron" data-open={isOpen || undefined} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
               <path d="M6 3.5l4.5 4.5L6 12.5" />
             </svg>
@@ -462,18 +470,56 @@ function FloatWindow({
             <span className="bm-session-chevron bm-session-leaf" />
           )}
           <div className="bm-list-row-main">
-            <span className="bm-list-title">{root.title || root.id.slice(0, 8)}</span>
             <span className="bm-list-sub">
-              {root.lastEvent ? new Date(root.lastEvent).toLocaleString() : ""} · {i18n("reqLabel")} {total.requests} {i18n("req")}
-              {hasChildren ? ` · ${children.length} ${i18n("subSessions")}` : ""}
+              {session.lastEvent ? new Date(session.lastEvent).toLocaleString() : ""} · {i18n("reqLabel")} {session.requests} {i18n("req")}
             </span>
           </div>
-          <span className="bm-list-cost">{currency}{fmtMoney(total.cost)}</span>
+          <span className="bm-list-cost">{currency}{fmtMoney(session.cost)}</span>
         </div>
         {isOpen && (
           <div className="bm-session-children">
-            {renderSessionDetail(root)}
-            {children.map((child) => renderGroup(child))}
+            {renderSessionDetail(session)}
+            {children.map((child) => renderSessionRow(child))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  /** One title group row; expands to every session in the group. */
+  const renderTitleGroup = (group: { key: string; title: string; list: SessionRow[]; cost: number; requests: number }) => {
+    const isOpen = expanded.has(group.key);
+    const multiple = group.list.length > 1;
+    return (
+      <div className="bm-session-group" key={group.key}>
+        <div
+          className="bm-list-row"
+          role="button"
+          tabIndex={0}
+          onClick={() => (multiple ? toggleExpand(group.key) : void renderSessionRow(group.list[0]))}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && multiple) toggleExpand(group.key);
+          }}
+        >
+          {multiple ? (
+            <svg className="bm-session-chevron" data-open={isOpen || undefined} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 3.5l4.5 4.5L6 12.5" />
+            </svg>
+          ) : (
+            <span className="bm-session-chevron bm-session-leaf" />
+          )}
+          <div className="bm-list-row-main">
+            <span className="bm-list-title">{group.title}</span>
+            <span className="bm-list-sub">
+              {i18n("reqLabel")} {group.requests} {i18n("req")}
+              {multiple ? ` · ${group.list.length} ${i18n("sessionCount")}` : ""}
+            </span>
+          </div>
+          <span className="bm-list-cost">{currency}{fmtMoney(group.cost)}</span>
+        </div>
+        {isOpen && (
+          <div className="bm-session-children">
+            {group.list.map((session) => renderSessionRow(session))}
           </div>
         )}
       </div>
@@ -646,7 +692,7 @@ function FloatWindow({
 
         <Card>
           <div className="bm-row">
-            <span className="bm-cal-title">{i18n("sessions")} ({totalGroups})</span>
+            <span className="bm-cal-title">{i18n("sessions")} ({totalGroups} {i18n("groupsUnit")} · {sessions.length})</span>
             {totalGroups > 6 && (
               <button
                 type="button"
@@ -660,11 +706,11 @@ function FloatWindow({
               </button>
             )}
           </div>
-          {visibleRoots.length === 0 ? (
+          {visibleGroups.length === 0 ? (
             <span className="bm-empty">{i18n("noSessions")}</span>
           ) : (
             <div className="bm-list">
-              {visibleRoots.map((root) => renderGroup(root))}
+              {visibleGroups.map((group) => renderTitleGroup(group))}
             </div>
           )}
         </Card>
