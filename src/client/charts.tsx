@@ -185,13 +185,6 @@ export function StackedBarChart({
           <span className="bm-chart-label">{bucket.label}</span>
         </div>
       ))}
-      {modelIds.length > 0 && (
-        <div className="bm-legend">
-          {modelIds.map((id) => (
-            <span key={id}><i style={{ background: modelColor(id) }} />{id}</span>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
