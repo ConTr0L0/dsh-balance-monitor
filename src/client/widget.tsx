@@ -204,7 +204,7 @@ export function SidebarWidget({ wide, rpc }: { wide: boolean; rpc: RpcCall }) {
             <i />{peak === "peak" ? i18n("peakShort") : i18n("offpeakShort")}
           </span>
         )}
-        <span className="bm-pill-badge" aria-hidden>¥</span>
+        {!wide && <span className="bm-pill-badge" aria-hidden>¥</span>}
         <span className="bm-pill-main">
           {display?.showBalance !== false && (
             <span
@@ -222,7 +222,7 @@ export function SidebarWidget({ wide, rpc }: { wide: boolean; rpc: RpcCall }) {
             </span>
           )}
         </span>
-        {display?.showRefresh !== false && (
+        {wide && display?.showRefresh !== false && (
           <button
             type="button"
             className="bm-iconbtn"
@@ -553,8 +553,6 @@ function FloatWindow({
               </option>
             ))}
           </select>
-          <span className="bm-title-dot" />
-          <span className="bm-title-status">{i18n("running")}</span>
         </span>
         <span className="bm-trend" data-status={peak} data-tip={peak === "peak" ? i18n("peak") : i18n("offpeak")}>
           <i />{peak === "peak" ? i18n("peakFull") : i18n("offpeakFull")}
