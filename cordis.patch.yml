@@ -1,0 +1,13 @@
+# dsh-balance-monitor bundle patch
+#
+# Installed through the official CLI:
+#
+#   dsh plugin --profile <name> add dsh-balance-monitor@<version>
+#
+# The command reconciles `dsh.profile.bundles` against installed packages
+# and, seeing this declaration, appends `dsh-balance-monitor` to the bundle
+# stack. The profile boot then merges THIS patch (a single `insert` of the
+# plugin row) exactly like a manual cordis.patch.yml mount line.
+- insert:
+    - id: balance-monitor
+      name: 'dsh-balance-monitor'

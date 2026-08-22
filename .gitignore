@@ -1,0 +1,5 @@
+node_modules/
+lib/.client.raw.js
+*.tmpx
+*.tmp-*
+npm-debug.log*
