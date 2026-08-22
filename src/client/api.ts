@@ -53,6 +53,7 @@ export interface Overview {
   lastEventAt: number;
   limits: LimitRow[];
   peak: { status: "peak" | "off-peak"; windows: string[][]; offPeakFactor: number };
+  pricing: { source: string; fetchedAt: number; modelCount: number };
   savedAt: number;
 }
 

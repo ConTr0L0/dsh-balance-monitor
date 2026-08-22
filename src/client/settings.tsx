@@ -1,26 +1,21 @@
 /**
  * Settings card for dsh-balance-monitor (DSH Settings → 余额监控).
+ *
  * Auto-saves (debounced); secret fields are write-only through
- * config/setSecret so values never cross the wire.
+ * config/setSecret so values never cross the wire. Billing rules are NOT
+ * exposed — they are verified automatically from the official docs and only
+ * reported as a sync status; provider keys are one merged column; rare
+ * settings (base URLs) live in a collapsible "Advanced" group.
  */
 import { useEffect, useRef, useState } from "react";
-import type { ConfigValue, RpcCall, SecretSlot } from "./api";
-import type { TranslateNS } from "@deepseek-ai/dsh-client-ui-slots";
-
-type T = TranslateNS<"balance">;
+import type { ConfigValue, Overview, RpcCall, SecretSlot } from "./api";
+import { t as i18n } from "./locales";
 
 interface LimitDraft {
   enabled: boolean;
   value: string;
   action: "warn" | "block";
   showInSidebar: boolean;
-}
-
-interface ModelDraft {
-  id: string;
-  input: string;
-  cacheHit: string;
-  output: string;
 }
 
 interface Draft {
@@ -37,11 +32,6 @@ interface Draft {
     showRefresh: boolean;
   };
   limits: Record<"daily" | "total" | "requests", LimitDraft>;
-  prices: {
-    peakWindows: [string, string][];
-    offPeakFactor: string;
-    models: ModelDraft[];
-  };
 }
 
 const LIMIT_KEYS = ["daily", "total", "requests"] as const;
@@ -56,17 +46,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 function toDraft(value: Record<string, unknown>): Draft {
   const providersIn = (value.providers ?? {}) as Record<string, { baseURL?: string }>;
   const limitsIn = (value.limits ?? {}) as Record<string, { enabled?: boolean; value?: number; action?: string; showInSidebar?: boolean }>;
-  const pricesIn = (value.prices ?? {}) as Record<string, unknown>;
-  const modelsIn = (pricesIn.models ?? {}) as Record<string, { input?: number; cacheHit?: number; output?: number }>;
   const displayIn = (value.display ?? {}) as Record<string, unknown>;
-  const models: ModelDraft[] = Object.entries(modelsIn)
-    .filter(([id]) => id !== "__default")
-    .map(([id, entry]) => ({
-      id,
-      input: String(entry.input ?? 0),
-      cacheHit: String(entry.cacheHit ?? 0),
-      output: String(entry.output ?? 0),
-    }));
   return {
     enabled: Boolean(value.enabled),
     refreshInterval: (value.refreshInterval as number) ?? 60,
@@ -93,32 +73,11 @@ function toDraft(value: Record<string, unknown>): Draft {
         },
       ]),
     ) as Draft["limits"],
-    prices: {
-      peakWindows: ((pricesIn.peakWindows as [string, string][]) ?? [["09:00", "12:00"], ["14:00", "18:00"]]),
-      offPeakFactor: String(pricesIn.offPeakFactor ?? 0.5),
-      models,
-    },
   };
 }
 
-/** Build the wire patch for config/patch (secrets excluded; removed models
- *  are sent as `null` so the host deletes them from the price table). */
-function toPatch(draft: Draft, baselineModels: Set<string>): Record<string, unknown> {
-  const models: Record<string, unknown> = {};
-  const seen = new Set<string>();
-  for (const model of draft.prices.models) {
-    const id = model.id.trim();
-    if (!id) continue;
-    seen.add(id);
-    models[id] = {
-      input: Number(model.input) || 0,
-      cacheHit: Number(model.cacheHit) || 0,
-      output: Number(model.output) || 0,
-    };
-  }
-  for (const id of baselineModels) {
-    if (!seen.has(id)) models[id] = null;
-  }
+/** Build the wire patch for config/patch (secrets excluded). */
+function toPatch(draft: Draft): Record<string, unknown> {
   return {
     enabled: draft.enabled,
     refreshInterval: draft.refreshInterval,
@@ -137,32 +96,43 @@ function toPatch(draft: Draft, baselineModels: Set<string>): Record<string, unkn
         },
       ]),
     ),
-    prices: {
-      peakWindows: draft.prices.peakWindows,
-      offPeakFactor: Number(draft.prices.offPeakFactor) || 0,
-      models,
-    },
   };
 }
 
-export function SettingsCard({ rpc, t }: { rpc: RpcCall; t: T }) {
+function statusLabel(overview: Overview | null): string {
+  const pricing = overview?.pricing;
+  if (!pricing) return i18n("pricingUnknown");
+  if (pricing.source !== "deepseek-docs") return i18n("pricingBuiltin");
+  return i18n("pricingSynced", { n: pricing.modelCount });
+}
+
+function syncAgo(overview: Overview | null): string {
+  const fetchedAt = overview?.pricing?.fetchedAt ?? 0;
+  if (!fetchedAt) return "—";
+  const hours = Math.floor((Date.now() - fetchedAt) / 3_600_000);
+  if (hours < 1) return "< 1h";
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+export function SettingsCard({ rpc }: { rpc: RpcCall }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [secrets, setSecrets] = useState<SecretSlot[]>([]);
   const [revision, setRevision] = useState(0);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [overview, setOverview] = useState<Overview | null>(null);
   const saveTimer = useRef<number | null>(null);
-  const baselineModels = useRef<Set<string>>(new Set());
 
   const load = async () => {
     try {
       const config = await rpc<ConfigValue>("config/get");
-      const next = toDraft((config.value ?? {}) as Record<string, unknown>);
-      baselineModels.current = new Set(next.prices.models.map((model) => model.id.trim()).filter(Boolean));
-      setDraft(next);
+      setDraft(toDraft((config.value ?? {}) as Record<string, unknown>));
       setSecrets(config.secrets ?? []);
       setRevision(config.revision);
       setSaveState("idle");
-    } catch (error) {
+      const overviewData = await rpc<Overview>("overview");
+      setOverview(overviewData);
+    } catch {
       setSaveState("error");
     }
   };
@@ -189,10 +159,10 @@ export function SettingsCard({ rpc, t }: { rpc: RpcCall; t: T }) {
   const save = async () => {
     if (!draft) return;
     try {
-      await rpc("config/patch", { patch: toPatch(draft, baselineModels.current), revision });
+      await rpc("config/patch", { patch: toPatch(draft), revision });
       await load();
       setSaveState("saved");
-    } catch (error) {
+    } catch {
       setSaveState("error");
     }
   };
@@ -203,7 +173,7 @@ export function SettingsCard({ rpc, t }: { rpc: RpcCall; t: T }) {
       await rpc("config/setSecret", { path: ["providers", provider, "apiKey"], value, revision });
       await load();
       setSaveState("saved");
-    } catch (error) {
+    } catch {
       setSaveState("error");
     }
   };
@@ -214,14 +184,14 @@ export function SettingsCard({ rpc, t }: { rpc: RpcCall; t: T }) {
   };
 
   if (!draft) {
-    return <div className="bm-empty">{t("loading")}</div>;
+    return <div className="bm-empty">{i18n("loading")}</div>;
   }
 
   return (
     <div className="bm-settings">
       <div className="bm-group">
         <div className="bm-toggle">
-          <span>{t("enable")}</span>
+          <span>{i18n("enable")}</span>
           <label className="bm-switch">
             <input type="checkbox" checked={draft.enabled} onChange={(event) => mutate((c) => ({ ...c, enabled: event.target.checked }))} />
             <i />
@@ -229,7 +199,7 @@ export function SettingsCard({ rpc, t }: { rpc: RpcCall; t: T }) {
         </div>
         <div className="bm-grid2">
           <div className="bm-field">
-            <label>{t("refreshInterval")}</label>
+            <label>{i18n("refreshInterval")}</label>
             <select
               className="bm-select"
               value={draft.refreshInterval}
@@ -243,50 +213,34 @@ export function SettingsCard({ rpc, t }: { rpc: RpcCall; t: T }) {
         </div>
       </div>
 
-      <div className="bm-group">
-        <span className="bm-group-title">{t("providerKeys")}</span>
+      <div className="bm-group bm-keys-card">
+        <span className="bm-group-title">{i18n("providerKeys")}</span>
         {PROVIDERS.map((id) => (
-          <div className="bm-grid2" key={id}>
-            <div className="bm-field">
-              <label>{PROVIDER_LABELS[id]} · {t("apiKey")}</label>
-              <div className="bm-secret">
-                <input
-                  className="bm-input"
-                  type="password"
-                  autoComplete="off"
-                  placeholder={secretSet(id) ? t("keySet") : t("keyUnset")}
-                  value=""
-                  onFocus={(event) => (event.target.value = "")}
-                  onChange={(event) => {
-                    if (event.target.value) void saveSecret(id, event.target.value);
-                    event.target.value = "";
-                  }}
-                />
-              </div>
-            </div>
-            <div className="bm-field">
-              <label>Base URL</label>
+          <div className="bm-key-row" key={id}>
+            <span className="bm-key-name">{PROVIDER_LABELS[id]}</span>
+            <div className="bm-secret bm-secret-grow">
               <input
                 className="bm-input"
-                value={draft.providers[id]?.baseURL ?? ""}
-                onChange={(event) =>
-                  mutate((c) => ({
-                    ...c,
-                    providers: { ...c.providers, [id]: { baseURL: event.target.value } },
-                  }))
-                }
+                type="password"
+                autoComplete="off"
+                placeholder={secretSet(id) ? i18n("keySet") : i18n("keyUnset")}
+                value=""
+                onChange={(event) => {
+                  if (event.target.value) void saveSecret(id, event.target.value);
+                  event.target.value = "";
+                }}
               />
             </div>
           </div>
         ))}
-        <span className="bm-note">{t("deepseekAutoKey")}</span>
+        <span className="bm-note">{i18n("deepseekAutoKey")}</span>
       </div>
 
       <div className="bm-group">
-        <span className="bm-group-title">{t("displayTitle")}</span>
+        <span className="bm-group-title">{i18n("displayTitle")}</span>
         <div className="bm-grid2">
           <div className="bm-field">
-            <label>{t("defaultProvider")}</label>
+            <label>{i18n("defaultProvider")}</label>
             <select
               className="bm-select"
               value={draft.display.provider}
@@ -298,7 +252,7 @@ export function SettingsCard({ rpc, t }: { rpc: RpcCall; t: T }) {
             </select>
           </div>
           <div className="bm-field">
-            <label>{t("balanceField")}</label>
+            <label>{i18n("balanceField")}</label>
             <select
               className="bm-select"
               value={draft.display.field}
@@ -306,8 +260,8 @@ export function SettingsCard({ rpc, t }: { rpc: RpcCall; t: T }) {
                 mutate((c) => ({ ...c, display: { ...c.display, field: event.target.value as "total" | "available" } }))
               }
             >
-              <option value="total">{t("fieldTotal")}</option>
-              <option value="available">{t("fieldAvailable")}</option>
+              <option value="total">{i18n("fieldTotal")}</option>
+              <option value="available">{i18n("fieldAvailable")}</option>
             </select>
           </div>
         </div>
@@ -319,7 +273,7 @@ export function SettingsCard({ rpc, t }: { rpc: RpcCall; t: T }) {
           ["showRefresh", "setShowRefresh"],
         ] as const).map(([key, labelKey]) => (
           <div className="bm-toggle" key={key}>
-            <span>{t(labelKey as never)}</span>
+            <span>{i18n(labelKey)}</span>
             <label className="bm-switch">
               <input
                 type="checkbox"
@@ -333,137 +287,21 @@ export function SettingsCard({ rpc, t }: { rpc: RpcCall; t: T }) {
       </div>
 
       <div className="bm-group">
-        <span className="bm-group-title">{t("pricesTitle")}</span>
-        <div className="bm-grid2">
-          <div className="bm-field">
-            <label>{t("peakWindows")} (UTC+8)</label>
-            {draft.prices.peakWindows.map((window, index) => (
-              <div className="bm-secret" key={index} style={{ marginBottom: 6 }}>
-                <input
-                  className="bm-input"
-                  value={window[0]}
-                  onChange={(event) =>
-                    mutate((c) => {
-                      const next = c.prices.peakWindows.map((entry) => [...entry] as [string, string]);
-                      next[index][0] = event.target.value;
-                      return { ...c, prices: { ...c.prices, peakWindows: next } };
-                    })
-                  }
-                />
-                <input
-                  className="bm-input"
-                  value={window[1]}
-                  onChange={(event) =>
-                    mutate((c) => {
-                      const next = c.prices.peakWindows.map((entry) => [...entry] as [string, string]);
-                      next[index][1] = event.target.value;
-                      return { ...c, prices: { ...c.prices, peakWindows: next } };
-                    })
-                  }
-                />
-              </div>
-            ))}
-            <button
-              type="button"
-              className="bm-dashed"
-              onClick={() =>
-                mutate((c) => ({
-                  ...c,
-                  prices: { ...c.prices, peakWindows: [...c.prices.peakWindows, ["09:00", "12:00"]] },
-                }))
-              }
-            >
-              +
-            </button>
-          </div>
-          <div className="bm-field">
-            <label>{t("offPeakFactor")}</label>
-            <input
-              className="bm-input"
-              value={draft.prices.offPeakFactor}
-              onChange={(event) => mutate((c) => ({ ...c, prices: { ...c.prices, offPeakFactor: event.target.value } }))}
-            />
-          </div>
-        </div>
-        <div className="bm-group">
-          {draft.prices.models.map((model, index) => (
-            <div className="bm-grid2" key={`${model.id}-${index}`}>
-              <div className="bm-field">
-                <label>Model</label>
-                <input
-                  className="bm-input"
-                  value={model.id}
-                  onChange={(event) =>
-                    mutate((c) => {
-                      const next = c.prices.models.map((entry) => ({ ...entry }));
-                      next[index].id = event.target.value;
-                      return { ...c, prices: { ...c.prices, models: next } };
-                    })
-                  }
-                />
-              </div>
-              <div className="bm-grid2">
-                <div className="bm-field">
-                  <label>input ¥/M</label>
-                  <input className="bm-input" value={model.input} onChange={(event) => mutate((c) => { const next = c.prices.models.map((entry) => ({ ...entry })); next[index].input = event.target.value; return { ...c, prices: { ...c.prices, models: next } }; })} />
-                </div>
-                <div className="bm-field">
-                  <label>cache ¥/M</label>
-                  <input className="bm-input" value={model.cacheHit} onChange={(event) => mutate((c) => { const next = c.prices.models.map((entry) => ({ ...entry })); next[index].cacheHit = event.target.value; return { ...c, prices: { ...c.prices, models: next } }; })} />
-                </div>
-                <div className="bm-field">
-                  <label>output ¥/M</label>
-                  <input className="bm-input" value={model.output} onChange={(event) => mutate((c) => { const next = c.prices.models.map((entry) => ({ ...entry })); next[index].output = event.target.value; return { ...c, prices: { ...c.prices, models: next } }; })} />
-                </div>
-                <div className="bm-field" style={{ justifyContent: "flex-end", display: "flex" }}>
-                  <button
-                    type="button"
-                    className="bm-dashed"
-                    style={{ width: "100%" }}
-                    onClick={() =>
-                      mutate((c) => ({
-                        ...c,
-                        prices: { ...c.prices, models: c.prices.models.filter((_, i) => i !== index) },
-                      }))
-                    }
-                  >
-                    {t("remove")}
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-          <button
-            type="button"
-            className="bm-dashed"
-            onClick={() =>
-              mutate((c) => ({
-                ...c,
-                prices: { ...c.prices, models: [...c.prices.models, { id: "", input: "3.0", cacheHit: "0.1", output: "9.0" }] },
-              }))
-            }
-          >
-            + {t("addModel")}
-          </button>
-        </div>
-      </div>
-
-      <div className="bm-group">
-        <span className="bm-group-title">{t("limitsTitle")}</span>
+        <span className="bm-group-title">{i18n("limitsTitle")}</span>
         <div className="bm-limit-grid">
           {LIMIT_KEYS.map((key) => {
             const limit = draft.limits[key];
             return (
               <div className="bm-limit-card" key={key}>
                 <div className="bm-limit-name">
-                  {t(`limit.${key}` as never)}
+                  {i18n(`limit.${key}`)}
                   <label className="bm-switch">
                     <input type="checkbox" checked={limit.enabled} onChange={(event) => mutate((c) => ({ ...c, limits: { ...c.limits, [key]: { ...c.limits[key], enabled: event.target.checked } } }))} />
                     <i />
                   </label>
                 </div>
                 <div className="bm-field">
-                  <label>{t("limitValue")}</label>
+                  <label>{i18n("limitValue")}</label>
                   <input
                     className="bm-input"
                     value={limit.value}
@@ -472,7 +310,7 @@ export function SettingsCard({ rpc, t }: { rpc: RpcCall; t: T }) {
                   />
                 </div>
                 <div className="bm-field">
-                  <label>{t("limitAction")}</label>
+                  <label>{i18n("limitAction")}</label>
                   <select
                     className="bm-select"
                     value={limit.action}
@@ -481,12 +319,12 @@ export function SettingsCard({ rpc, t }: { rpc: RpcCall; t: T }) {
                       mutate((c) => ({ ...c, limits: { ...c.limits, [key]: { ...c.limits[key], action: event.target.value as "warn" | "block" } } }))
                     }
                   >
-                    <option value="warn">{t("actionWarn")}</option>
-                    <option value="block">{t("actionBlock")}</option>
+                    <option value="warn">{i18n("actionWarn")}</option>
+                    <option value="block">{i18n("actionBlock")}</option>
                   </select>
                 </div>
                 <div className="bm-toggle">
-                  <span>{t("showInSidebar")}</span>
+                  <span>{i18n("showInSidebar")}</span>
                   <label className="bm-switch">
                     <input type="checkbox" checked={limit.showInSidebar} disabled={!limit.enabled} onChange={(event) => mutate((c) => ({ ...c, limits: { ...c.limits, [key]: { ...c.limits[key], showInSidebar: event.target.checked } } }))} />
                     <i />
@@ -498,17 +336,51 @@ export function SettingsCard({ rpc, t }: { rpc: RpcCall; t: T }) {
         </div>
       </div>
 
+      <details className="bm-advanced">
+        <summary>{i18n("advanced")}</summary>
+        <div className="bm-advanced-body">
+          <span className="bm-note">{i18n("advancedHint")}</span>
+
+          <div className="bm-field">
+            <label>{i18n("pricingStatus")}</label>
+            <div className="bm-pricing-row">
+              <span className="bm-pricing-state">{statusLabel(overview)}</span>
+              <span className="bm-pricing-ago">{syncAgo(overview)}</span>
+            </div>
+            <span className="bm-note">{i18n("pricingNote")}</span>
+          </div>
+
+          <div className="bm-grid2">
+            {PROVIDERS.map((id) => (
+              <div className="bm-field" key={id}>
+                <label>{PROVIDER_LABELS[id]} Base URL</label>
+                <input
+                  className="bm-input"
+                  value={draft.providers[id]?.baseURL ?? ""}
+                  onChange={(event) =>
+                    mutate((c) => ({
+                      ...c,
+                      providers: { ...c.providers, [id]: { baseURL: event.target.value } },
+                    }))
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      </details>
+
       <div className="bm-save">
         <span className="bm-save-hint">
-          {saveState === "saving" ? t("saving") : saveState === "saved" ? t("saved") : saveState === "error" ? t("saveError") : ""}
+          {saveState === "saving" ? i18n("saving") : saveState === "saved" ? i18n("saved") : saveState === "error" ? i18n("saveError") : ""}
         </span>
         {saveState === "error" ? (
           <button type="button" className="bm-dashed" style={{ borderStyle: "solid" }} onClick={() => void save()}>
-            {t("retry")}
+            {i18n("retry")}
           </button>
         ) : (
-          <button type="button" className="bm-dashed" style={{ borderStyle: "solid" }} onClick={() => void save()}>
-            {t("saveNow")}
+          <button type="button" className="bm-pill-button" onClick={() => void save()}>
+            {i18n("saveNow")}
           </button>
         )}
       </div>

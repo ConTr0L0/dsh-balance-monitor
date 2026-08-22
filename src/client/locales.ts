@@ -1,0 +1,169 @@
+/**
+ * Locale dictionaries + module-level translate for dsh-balance-monitor.
+ *
+ * Follows the pattern used by proven third-party plugins: dictionaries are
+ * registered into the DSH locale registry (so the plugin's copy follows the
+ * active locale and switches live), while components translate through this
+ * module-level `t()` instead of depending on the framework slot `t` seat —
+ * one less failure mode in the slot renderer.
+ */
+
+export const NS = "balance";
+
+/** Simplified Chinese dictionary (the key-set source of truth). */
+const zh: Record<string, string> = {
+  name: "余额监控",
+  settingsNav: "余额监控",
+  noKey: "未配置",
+  today: "今日",
+  refresh: "刷新",
+  peak: "高峰",
+  offpeak: "谷时",
+  available: "可用",
+  used: "已用",
+  granted: "赠送",
+  toppedUp: "充值",
+  updated: "更新于",
+  req: "次",
+  totalCost: "累计消耗",
+  history7: "近 7 天消耗",
+  heatNote: "颜色越深，当日消耗越多",
+  sessions: "会话消耗",
+  noSessions: "暂无消耗数据",
+  showAll: "全部",
+  collapse: "收起",
+  settingsHint: "在 DSH 设置 → 余额监控 中配置 API Key、上限与显示项",
+  loading: "加载中…",
+  enable: "启用插件",
+  refreshInterval: "余额刷新频率",
+  providerKeys: "平台 API Key",
+  apiKey: "API Key",
+  keySet: "已设置（输入新值替换）",
+  keyUnset: "未设置",
+  deepseekAutoKey: "DeepSeek 留空时自动复用 DSH 凭据中的 DEEPSEEK_API_KEY",
+  displayTitle: "侧边栏显示",
+  defaultProvider: "默认平台",
+  balanceField: "余额口径",
+  fieldTotal: "账户余额",
+  fieldAvailable: "可用余额",
+  setShowBalance: "显示余额",
+  setShowToday: "显示今日消耗",
+  setShowRemaining: "显示上限进度",
+  setShowPeak: "显示峰谷状态",
+  setShowRefresh: "显示刷新按钮",
+  advanced: "高级",
+  advancedHint: "以下设置适用于进阶场景",
+  baseURLs: "平台接口地址（Base URL）",
+  pricingStatus: "计费规则",
+  pricingBuiltin: "使用内置默认价目（官方同步未完成）",
+  pricingSynced: "已自动同步 DeepSeek 官方价目（{n} 个模型）",
+  pricingUnknown: "未同步（保持上次结果）",
+  pricingNote: "计费规则由插件自动从 DeepSeek 官方文档查证，无需手动配置",
+  limitsTitle: "消耗上限",
+  "limit.daily": "每日金额上限",
+  "limit.total": "累计金额上限",
+  "limit.requests": "请求次数上限",
+  limitValue: "上限值",
+  limitAction: "超限行为",
+  actionWarn: "仅提醒",
+  actionBlock: "提醒并终止",
+  showInSidebar: "侧边栏显示",
+  saving: "保存中…",
+  saved: "已保存",
+  saveError: "保存失败",
+  retry: "重试",
+  saveNow: "立即保存",
+};
+
+/** English dictionary, checked complete against the zh key set. */
+const en: Record<string, string> = {
+  name: "Balance Monitor",
+  settingsNav: "Balance Monitor",
+  noKey: "No key",
+  today: "Today",
+  refresh: "Refresh",
+  peak: "Peak",
+  offpeak: "Off-peak",
+  available: "available",
+  used: "used",
+  granted: "granted",
+  toppedUp: "top-up",
+  updated: "updated",
+  req: "req",
+  totalCost: "Total spend",
+  history7: "Last 7 days",
+  heatNote: "Darker = more spent that day",
+  sessions: "Sessions",
+  noSessions: "No usage data yet",
+  showAll: "all",
+  collapse: "collapse",
+  settingsHint: "Configure API keys, limits and display in DSH Settings → Balance Monitor",
+  loading: "Loading…",
+  enable: "Enable plugin",
+  refreshInterval: "Balance refresh interval",
+  providerKeys: "Provider API keys",
+  apiKey: "API Key",
+  keySet: "Set (type a new value to replace)",
+  keyUnset: "Not set",
+  deepseekAutoKey: "DeepSeek reuses the DSH credential DEEPSEEK_API_KEY when left empty",
+  displayTitle: "Sidebar display",
+  defaultProvider: "Default provider",
+  balanceField: "Balance figure",
+  fieldTotal: "Account balance",
+  fieldAvailable: "Available balance",
+  setShowBalance: "Show balance",
+  setShowToday: "Show today's spend",
+  setShowRemaining: "Show limit progress",
+  setShowPeak: "Show peak/off-peak",
+  setShowRefresh: "Show refresh button",
+  advanced: "Advanced",
+  advancedHint: "Settings below are for advanced scenarios",
+  baseURLs: "Provider base URLs",
+  pricingStatus: "Billing rules",
+  pricingBuiltin: "Using the built-in default price table (official sync pending)",
+  pricingSynced: "Auto-synced from official DeepSeek docs ({n} models)",
+  pricingUnknown: "Not synced (keeping the last result)",
+  pricingNote: "Billing rules are verified automatically from the official DeepSeek docs — nothing to configure",
+  limitsTitle: "Spending limits",
+  "limit.daily": "Daily amount",
+  "limit.total": "Total amount",
+  "limit.requests": "Request count",
+  limitValue: "Limit",
+  limitAction: "When exceeded",
+  actionWarn: "Warn only",
+  actionBlock: "Warn and block",
+  showInSidebar: "Show in sidebar",
+  saving: "Saving…",
+  saved: "Saved",
+  saveError: "Save failed",
+  retry: "Retry",
+  saveNow: "Save now",
+};
+
+/** Module-level locale handle (wired in apply). */
+let localeService: { getSnapshot: () => { active: string } } | null = null;
+
+/** Override used by the plugin apply body. */
+export function attachLocale(service: { getSnapshot: () => { active: string } } | null) {
+  localeService = service;
+}
+
+function activeLocale(): string {
+  return (
+    localeService?.getSnapshot().active ??
+    (typeof navigator !== "undefined" ? navigator.language : "en") ??
+    "en"
+  );
+}
+
+/** Translate a copy key with optional `{name}` template params. */
+export function t(key: string, params?: Record<string, unknown>): string {
+  const dict = activeLocale().toLowerCase().startsWith("zh") ? zh : en;
+  let text = dict[key] ?? en[key] ?? key;
+  if (params) {
+    for (const [name, value] of Object.entries(params)) text = text.replaceAll(`{${name}}`, String(value));
+  }
+  return text;
+}
+
+export { zh, en };

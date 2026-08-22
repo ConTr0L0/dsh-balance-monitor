@@ -1,14 +1,17 @@
 /**
  * Sidebar entry widget + popover detail panel for dsh-balance-monitor.
+ *
+ * The widget is a full-row oval "floating pill" above the Settings control
+ * in the left sidebar. The popover renders through a portal into document
+ * body; an inner error boundary keeps any panel-side failure from retiring
+ * the sidebar entry.
  */
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { createPortal } from "react-dom/client";
+import { Component, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { t as i18n } from "./locales";
 import { fmtMoney, BarChart, MonthHeatmap } from "./charts";
 import { getSnapshot, manualRefresh, refreshAll, subscribe } from "./store";
 import type { ProviderId, RpcCall } from "./api";
-import type { TranslateNS } from "@deepseek-ai/dsh-client-ui-slots";
-
-type T = TranslateNS<"balance">;
 
 const PROVIDER_LABELS: Record<string, string> = {
   deepseek: "DeepSeek",
@@ -28,6 +31,12 @@ function providerPrimary(provider: Record<string, unknown> | undefined, field: s
   return typeof value === "number" ? value : null;
 }
 
+function providerAvailable(provider: Record<string, unknown> | undefined): number | null {
+  if (!provider) return null;
+  const value = provider.available;
+  return typeof value === "number" ? value : null;
+}
+
 function timeAgo(ms: number): string {
   const seconds = Math.max(0, Math.round((Date.now() - ms) / 1000));
   if (seconds < 60) return `${seconds}s`;
@@ -38,15 +47,35 @@ function timeAgo(ms: number): string {
   return `${Math.round(hours / 24)}d`;
 }
 
-export function SidebarWidget({
-  wide,
-  rpc,
-  t,
-}: {
-  wide: boolean;
-  rpc: RpcCall;
-  t: T;
-}) {
+/** Inner error boundary: renders a fallback instead of abdicating the entry. */
+class SafeBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
+function RefreshIcon({ spinning }: { spinning?: boolean }) {
+  return (
+    <svg className={spinning ? "bm-spin" : undefined} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
+      <path d="M13.7 1.8v3.4h-3.4" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+      <path d="M4 4l8 8M12 4l-8 8" />
+    </svg>
+  );
+}
+
+export function SidebarWidget({ wide, rpc }: { wide: boolean; rpc: RpcCall }) {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot);
   const { overview, error } = snapshot;
   const [open, setOpen] = useState(false);
@@ -93,8 +122,13 @@ export function SidebarWidget({
     }
   };
 
+  const balanceLabel =
+    provider?.ok === false && provider?.error === "no-api-key"
+      ? i18n("noKey")
+      : `${currency}${fmtMoney(primary)}`;
+
   return (
-    <>
+    <SafeBoundary fallback={<span className="bm-empty">—</span>}>
       <div
         ref={buttonRef}
         className={`bm-widget${wide ? "" : " bm-widget-rail"}`}
@@ -110,58 +144,68 @@ export function SidebarWidget({
             openPanel();
           }
         }}
-        title={t("name")}
+        title={i18n("name")}
       >
-        {display?.showBalance !== false && (
-          <span
-            className="bm-primary"
-            data-warn={anyLimitExceeded || undefined}
-            data-critical={anyBlocked || undefined}
-          >
-            {provider?.ok === false && provider?.error === "no-api-key"
-              ? t("noKey")
-              : `${currency}${fmtMoney(primary)}`}
-          </span>
-        )}
-        {wide && display?.showToday !== false && (
-          <span className="bm-secondary">{t("today")} {currency}{fmtMoney(todayCost)}</span>
-        )}
+        <span className="bm-pill-badge" aria-hidden>
+          ¥
+        </span>
+        <span className="bm-pill-main">
+          {display?.showBalance !== false && (
+            <span
+              className="bm-primary"
+              data-warn={anyLimitExceeded || undefined}
+              data-critical={anyBlocked || undefined}
+            >
+              {balanceLabel}
+            </span>
+          )}
+          {wide && display?.showToday !== false && (
+            <span className="bm-secondary">
+              {i18n("today")} {currency}{fmtMoney(todayCost)}
+              {showRemaining ? ` · ${fmtMoney(dailyLimit!.remaining)} / ${fmtMoney(dailyLimit!.value)}` : ""}
+            </span>
+          )}
+        </span>
         {wide && showRemaining && (
-          <span className="bm-progress" data-warn={dailyLimit?.exceeded || undefined} data-critical={dailyLimit?.action === "block" && dailyLimit.exceeded || undefined}>
+          <span
+            className="bm-progress"
+            data-warn={dailyLimit?.exceeded || undefined}
+            data-critical={(dailyLimit?.action === "block" && dailyLimit.exceeded) || undefined}
+          >
             <i style={{ width: `${Math.min(100, Math.round(dailyLimit!.progress * 100))}%` }} />
           </span>
         )}
-        {display?.showPeak !== false && <span className="bm-peak" data-status={peak} title={peak === "peak" ? t("peak") : t("offpeak")} />}
+        {display?.showPeak !== false && (
+          <span className="bm-peak" data-status={peak} title={peak === "peak" ? i18n("peak") : i18n("offpeak")} />
+        )}
         {wide && display?.showRefresh !== false && (
           <button
             type="button"
             className="bm-iconbtn"
             disabled={spinning}
-            aria-label={t("refresh")}
+            aria-label={i18n("refresh")}
+            title={i18n("refresh")}
             onClick={(event) => {
               event.stopPropagation();
               void doRefresh();
             }}
           >
-            <svg className={spinning ? "bm-spin" : undefined} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
-              <path d="M13.7 1.8v3.4h-3.4" />
-            </svg>
+            <RefreshIcon spinning={spinning} />
           </button>
         )}
       </div>
       {open && anchor && overview && (
-        <Popover
-          anchor={anchor}
-          onClose={() => setOpen(false)}
-          rpc={rpc}
-          t={t}
-          providerId={providerId}
-          onProviderChange={(provider) => void refreshAll(rpc)}
-        />
+        <SafeBoundary fallback={null}>
+          <Popover
+            anchor={anchor}
+            onClose={() => setOpen(false)}
+            rpc={rpc}
+            providerId={providerId}
+          />
+        </SafeBoundary>
       )}
       {open && !overview && error && <div className="bm-empty">{error}</div>}
-    </>
+    </SafeBoundary>
   );
 }
 
@@ -169,16 +213,12 @@ function Popover({
   anchor,
   onClose,
   rpc,
-  t,
   providerId,
-  onProviderChange,
 }: {
   anchor: { x: number; y: number; top: boolean };
   onClose: () => void;
   rpc: RpcCall;
-  t: T;
   providerId: string;
-  onProviderChange: (provider: string) => void;
 }) {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot);
   const { overview, history, sessions } = snapshot;
@@ -187,7 +227,6 @@ function Popover({
   const [month, setMonth] = useState(new Date().getMonth());
   const [spinning, setSpinning] = useState(false);
   const [showAllSessions, setShowAllSessions] = useState(false);
-  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -207,10 +246,6 @@ function Popover({
   const daily = overview.today ?? { cost: 0, requests: 0 };
   const limits = overview.limits ?? [];
   const enabledLimits = limits.filter((row) => row.enabled);
-  const providerConfigured = (id: string) => {
-    const entry = overview.providers[id] as Record<string, unknown> | undefined;
-    return entry !== undefined && (entry.configured === true || entry.error === "no-api-key" ? entry.configured === true : true);
-  };
   const displayOptions = Object.keys(overview.providers);
 
   const doRefresh = async () => {
@@ -234,7 +269,6 @@ function Popover({
 
   return createPortal(
     <div
-      ref={panelRef}
       className="bm-popover"
       style={
         anchor.top
@@ -242,7 +276,7 @@ function Popover({
           : { left: anchor.x + 8, top: anchor.y + 8 }
       }
       role="dialog"
-      aria-label={t("name")}
+      aria-label={i18n("name")}
     >
       <div className="bm-pop-header">
         <select
@@ -250,29 +284,24 @@ function Popover({
           value={provider}
           onChange={(event) => {
             setProvider(event.target.value);
-            onProviderChange(event.target.value);
+            void refreshAll(rpc);
           }}
         >
           {displayOptions.map((id) => (
             <option key={id} value={id}>
-              {PROVIDER_LABELS[id] ?? id}{providerConfigured(id) ? "" : " · no-key"}
+              {PROVIDER_LABELS[id] ?? id}
             </option>
           ))}
         </select>
-        <span className="bm-secondary" style={{ color: "var(--dsw-alias-label-tertiary)", fontSize: 11 }}>
-          {peak === "peak" ? t("peak") : t("offpeak")}
+        <span className="bm-peak-label" data-status={peak}>
+          {peak === "peak" ? i18n("peak") : i18n("offpeak")}
         </span>
         <span style={{ flex: 1 }} />
-        <button type="button" className="bm-iconbtn" onClick={() => void doRefresh()} disabled={spinning} aria-label={t("refresh")} title={t("refresh")}>
-          <svg className={spinning ? "bm-spin" : undefined} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
-            <path d="M13.7 1.8v3.4h-3.4" />
-          </svg>
+        <button type="button" className="bm-iconbtn" onClick={() => void doRefresh()} disabled={spinning} aria-label={i18n("refresh")} title={i18n("refresh")}>
+          <RefreshIcon spinning={spinning} />
         </button>
         <button type="button" className="bm-iconbtn" onClick={onClose} aria-label="close" title="close">
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-            <path d="M4 4l8 8M12 4l-8 8" />
-          </svg>
+          <CloseIcon />
         </button>
       </div>
 
@@ -283,23 +312,29 @@ function Popover({
             <>
               <span className="bm-big" data-warn>—</span>
               <span className="bm-note">
-                {(prov as { error?: string }).error === "no-api-key" ? t("noKey") : (prov as { error?: string }).error}
+                {(prov as { error?: string }).error === "no-api-key" ? i18n("noKey") : (prov as { error?: string }).error}
               </span>
             </>
           ) : (
             <>
-              <span className="bm-big">
-                {currency}{fmtMoney(primary)}
-              </span>
+              <span className="bm-big">{currency}{fmtMoney(primary)}</span>
               <span className="bm-note">
-                {t("available")} {currency}{fmtMoney(providerAvailable(prov))}
-                {typeof (prov as { used?: number })?.used === "number" ? ` · ${t("used")} ${currency}${fmtMoney((prov as { used?: number }).used ?? 0)}` : ""}
-                {typeof (prov as { limit?: number | null })?.limit === "number" ? ` / ${currency}${fmtMoney((prov as { limit?: number | null }).limit ?? 0)}` : ""}
-                {typeof (prov as { granted?: number })?.granted === "number" ? ` · ${t("granted")} ${currency}${fmtMoney((prov as { granted?: number }).granted ?? 0)}` : ""}
-                {typeof (prov as { toppedUp?: number })?.toppedUp === "number" ? ` · ${t("toppedUp")} ${currency}${fmtMoney((prov as { toppedUp?: number }).toppedUp ?? 0)}` : ""}
+                {i18n("available")} {currency}{fmtMoney(providerAvailable(prov))}
+                {typeof (prov as { used?: number })?.used === "number"
+                  ? ` · ${i18n("used")} ${currency}${fmtMoney((prov as { used?: number }).used ?? 0)}`
+                  : ""}
+                {typeof (prov as { limit?: number | null })?.limit === "number"
+                  ? ` / ${currency}${fmtMoney((prov as { limit?: number | null }).limit ?? 0)}`
+                  : ""}
+                {typeof (prov as { granted?: number })?.granted === "number"
+                  ? ` · ${i18n("granted")} ${currency}${fmtMoney((prov as { granted?: number }).granted ?? 0)}`
+                  : ""}
+                {typeof (prov as { toppedUp?: number })?.toppedUp === "number"
+                  ? ` · ${i18n("toppedUp")} ${currency}${fmtMoney((prov as { toppedUp?: number }).toppedUp ?? 0)}`
+                  : ""}
               </span>
               {(prov as { fetchedAt?: number })?.fetchedAt ? (
-                <span className="bm-note">{t("updated")} {timeAgo((prov as { fetchedAt: number }).fetchedAt)}</span>
+                <span className="bm-note">{i18n("updated")} {timeAgo((prov as { fetchedAt: number }).fetchedAt)}</span>
               ) : null}
             </>
           )}
@@ -307,20 +342,25 @@ function Popover({
 
         <div className="bm-card">
           <div className="bm-row">
-            <span>{t("today")}</span>
-            <span>{currency}{fmtMoney(daily.cost)} · {daily.requests} {t("req")}</span>
+            <span>{i18n("today")}</span>
+            <span>{currency}{fmtMoney(daily.cost)} · {daily.requests} {i18n("req")}</span>
           </div>
           <div className="bm-row">
-            <span>{t("totalCost")}</span>
-            <span>{currency}{fmtMoney(overview.totals.cost)} · {overview.totals.requests} {t("req")}</span>
+            <span>{i18n("totalCost")}</span>
+            <span>{currency}{fmtMoney(overview.totals.cost)} · {overview.totals.requests} {i18n("req")}</span>
           </div>
           {enabledLimits.map((row) => (
             <div key={row.key} className="bm-row">
-              <span>{t(row.labelKey as never) ?? row.key}</span>
+              <span>{i18n(row.labelKey) ?? row.key}</span>
               <span data-warn={row.exceeded || undefined}>
-                {fmtMoney(row.current)} / {row.key === "requests" ? `${row.value} ${t("req")}` : `${currency}${fmtMoney(row.value)}`}
+                {fmtMoney(row.current)} / {row.key === "requests" ? `${row.value} ${i18n("req")}` : `${currency}${fmtMoney(row.value)}`}
               </span>
-              <div className="bm-progress-lg" data-warn={row.exceeded || undefined} data-critical={row.action === "block" && row.exceeded || undefined} style={{ flex: "none", width: 72 }}>
+              <div
+                className="bm-progress-lg"
+                data-warn={row.exceeded || undefined}
+                data-critical={(row.action === "block" && row.exceeded) || undefined}
+                style={{ flex: "none", width: 72 }}
+              >
                 <i style={{ width: `${Math.round(row.progress * 100)}%` }} />
               </div>
             </div>
@@ -328,7 +368,7 @@ function Popover({
         </div>
 
         <div className="bm-card">
-          <span className="bm-cal-title">{t("history7")}</span>
+          <span className="bm-cal-title">{i18n("history7")}</span>
           <BarChart daily={history?.daily ?? {}} days={7} />
         </div>
 
@@ -343,14 +383,19 @@ function Popover({
             </button>
           </div>
           <MonthHeatmap daily={history?.daily ?? {}} year={year} month={month} />
-          <span className="bm-note">{t("heatNote")}</span>
+          <span className="bm-note">{i18n("heatNote")}</span>
         </div>
 
         <div className="bm-card">
           <div className="bm-row">
-            <span className="bm-cal-title">{t("sessions")} ({sessions.length})</span>
+            <span className="bm-cal-title">{i18n("sessions")} ({sessions.length})</span>
             {sessions.length > 8 && (
-              <button type="button" className="bm-iconbtn" onClick={() => setShowAllSessions((v) => !v)} title={showAllSessions ? t("collapse") : t("showAll")}>
+              <button
+                type="button"
+                className="bm-iconbtn"
+                onClick={() => setShowAllSessions((value) => !value)}
+                title={showAllSessions ? i18n("collapse") : i18n("showAll")}
+              >
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
                   {showAllSessions ? <path d="M4 10l4-4 4 4" /> : <path d="M4 6l4 4 4-4" />}
                 </svg>
@@ -358,7 +403,7 @@ function Popover({
             )}
           </div>
           {shownSessions.length === 0 ? (
-            <span className="bm-empty">{t("noSessions")}</span>
+            <span className="bm-empty">{i18n("noSessions")}</span>
           ) : (
             <div className="bm-list">
               {shownSessions.map((session) => (
@@ -366,7 +411,7 @@ function Popover({
                   <div className="bm-list-row-main">
                     <span className="bm-list-title">{session.title || session.id.slice(0, 8)}</span>
                     <span className="bm-list-sub">
-                      {session.lastEvent ? new Date(session.lastEvent).toLocaleString() : ""} · {session.requests} {t("req")}
+                      {session.lastEvent ? new Date(session.lastEvent).toLocaleString() : ""} · {session.requests} {i18n("req")}
                     </span>
                   </div>
                   <span className="bm-list-cost">{currency}{fmtMoney(session.cost)}</span>
@@ -376,18 +421,9 @@ function Popover({
           )}
         </div>
 
-        <span className="bm-note">{t("settingsHint")}</span>
+        <span className="bm-note">{i18n("settingsHint")}</span>
       </div>
     </div>,
     document.body,
   );
 }
-
-function providerAvailable(provider: Record<string, unknown> | undefined): number | null {
-  if (!provider) return null;
-  const value = provider.available;
-  return typeof value === "number" ? value : null;
-}
-
-/** Export a type marker so bundlers keep the module graph honest. */
-export type { T };
