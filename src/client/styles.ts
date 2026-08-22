@@ -41,8 +41,9 @@ const CSS = `
 .bm-popover[data-dragging],.bm-popover[data-resizing]{user-select:none}
 .bm-popover[data-resizing]{pointer-events:none}
 .bm-popover[data-resizing] .bm-pop-resize{pointer-events:auto}
-.bm-pop-resize{position:absolute;right:2px;bottom:2px;width:16px;height:16px;cursor:nwse-resize;z-index:7}
-.bm-pop-resize::after{content:"";position:absolute;right:3px;bottom:3px;width:9px;height:9px;border-right:2px solid color-mix(in srgb,var(--dsw-alias-label-primary) 45%,transparent);border-bottom:2px solid color-mix(in srgb,var(--dsw-alias-label-primary) 45%,transparent);border-radius:2px}
+.bm-pop-resize{position:absolute;right:3px;bottom:3px;width:22px;height:22px;cursor:nwse-resize;z-index:7;display:grid;place-items:end}
+.bm-pop-resize::after{content:"";width:11px;height:11px;border-right:2.5px solid color-mix(in srgb,var(--dsw-alias-label-primary) 60%,transparent);border-bottom:2.5px solid color-mix(in srgb,var(--dsw-alias-label-primary) 60%,transparent);border-radius:2px}
+.bm-pop-resize::before{content:"";position:absolute;right:6px;bottom:6px;width:7px;height:7px;border-right:2px solid color-mix(in srgb,var(--dsw-alias-label-primary) 35%,transparent);border-bottom:2px solid color-mix(in srgb,var(--dsw-alias-label-primary) 35%,transparent);border-radius:2px}
 .bm-popover[data-size="narrow"] .bm-quota-grid{grid-template-columns:1fr}
 .bm-popover[data-size="narrow"] .bm-big{font-size:24px}
 .bm-popover[data-size="narrow"] .bm-model-chips{gap:4px}

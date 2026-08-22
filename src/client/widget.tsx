@@ -314,7 +314,8 @@ function FloatWindow({
   };
   const startResize = (event: React.PointerEvent) => {
     if (event.button !== 0) return;
-    dragState.current = { dx: event.clientX, dy: event.clientY };
+    // Anchor on the CURRENT size: new size = start size + pointer delta.
+    dragState.current = { dx: event.clientX, dy: event.clientY, w0: size.w, h0: size.h };
     setResizing(true);
     event.preventDefault();
   };
@@ -328,8 +329,8 @@ function FloatWindow({
           y: Math.min(Math.max(8, event.clientY - dragState.current.dy), window.innerHeight - 80),
         });
       } else {
-        const w = Math.max(MIN_W, Math.min(window.innerWidth - 20, event.clientX - dragState.current.dx));
-        const h = Math.max(MIN_H, Math.min(window.innerHeight - 20, event.clientY - dragState.current.dy));
+        const w = Math.max(MIN_W, Math.min(window.innerWidth - 20, dragState.current.w0 + (event.clientX - dragState.current.dx)));
+        const h = Math.max(MIN_H, Math.min(window.innerHeight - 20, dragState.current.h0 + (event.clientY - dragState.current.dy)));
         setSize({ w, h });
       }
     };
