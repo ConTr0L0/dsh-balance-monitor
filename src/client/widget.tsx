@@ -1,17 +1,18 @@
 /**
- * Sidebar entry widget + glass popover detail panel for dsh-balance-monitor.
+ * Sidebar entry widget + floating glass window for dsh-balance-monitor.
  *
- * The widget is a full-row oval "floating plate" above the Settings control;
- * the popover is a transparent frosted-glass panel (TokenEye style) with a
- * settings gear that deep-links into the DSH settings page. An inner error
- * boundary keeps any panel-side failure from retiring the sidebar entry.
+ * The widget is a full-row oval "floating plate" above the Settings control.
+ * The window is draggable (header) and resizable (corner handle) with a hard
+ * minimum size and size-adaptive layout. It only closes via the ✕ button —
+ * data refreshes, re-renders, or per-card errors never dismiss it (each card
+ * is isolated by its own error boundary).
  */
 import { Component, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { t as i18n } from "./locales";
 import { fmtMoney, fmtTokens, modelTokens, modelColor, BarChart, MonthHeatmap } from "./charts";
 import { getSnapshot, manualRefresh, refreshAll, subscribe } from "./store";
-import type { ProviderId, RpcCall } from "./api";
+import type { ProviderId, RpcCall, SessionRow } from "./api";
 
 const PROVIDER_LABELS: Record<string, string> = {
   deepseek: "DeepSeek",
@@ -20,6 +21,10 @@ const PROVIDER_LABELS: Record<string, string> = {
   tavily: "Tavily",
 };
 
+const WIN_KEY = "dsh-balance-monitor.window";
+const MIN_W = 320;
+const MIN_H = 420;
+
 function currencySymbol(currency?: string) {
   return currency === "USD" ? "$" : "¥";
 }
@@ -27,12 +32,6 @@ function currencySymbol(currency?: string) {
 function providerPrimary(provider: Record<string, unknown> | undefined, field: string): number | null {
   if (!provider) return null;
   const value = field === "available" ? (provider.available as number) : (provider.total as number);
-  return typeof value === "number" ? value : null;
-}
-
-function providerAvailable(provider: Record<string, unknown> | undefined): number | null {
-  if (!provider) return null;
-  const value = provider.available;
   return typeof value === "number" ? value : null;
 }
 
@@ -64,7 +63,7 @@ function openSettingsSection() {
   }, 600);
 }
 
-/** Inner error boundary: renders a fallback instead of abdicating the entry. */
+/** Inner error boundary: a failed card renders a fallback, never unmounts the window. */
 class SafeBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() {
@@ -73,6 +72,14 @@ class SafeBoundary extends Component<{ fallback: ReactNode; children: ReactNode 
   render() {
     return this.state.failed ? this.props.fallback : this.props.children;
   }
+}
+
+function Card({ children }: { children: ReactNode }) {
+  return (
+    <SafeBoundary fallback={<div className="bm-empty">—</div>}>
+      <div className="bm-card">{children}</div>
+    </SafeBoundary>
+  );
 }
 
 function RefreshIcon({ spinning }: { spinning?: boolean }) {
@@ -101,6 +108,18 @@ function GearIcon() {
   );
 }
 
+function loadWindowPrefs() {
+  try {
+    const raw = localStorage.getItem(WIN_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.x === "number" && typeof parsed?.y === "number" && typeof parsed?.w === "number" && typeof parsed?.h === "number") return parsed;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 export function SidebarWidget({ wide, rpc }: { wide: boolean; rpc: RpcCall }) {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot);
   const { overview, error } = snapshot;
@@ -108,6 +127,7 @@ export function SidebarWidget({ wide, rpc }: { wide: boolean; rpc: RpcCall }) {
   const [anchor, setAnchor] = useState<{ x: number; y: number; top: boolean } | null>(null);
   const buttonRef = useRef<HTMLDivElement>(null);
   const [spinning, setSpinning] = useState(false);
+  const openedAt = useRef(0);
 
   const display = overview?.display;
   const providerId = (display?.provider ?? "deepseek") as ProviderId;
@@ -131,10 +151,14 @@ export function SidebarWidget({ wide, rpc }: { wide: boolean; rpc: RpcCall }) {
   }, [rpc, overview?.refreshInterval]);
 
   const openPanel = () => {
+    const now = Date.now();
+    // Rapid double-click guard: a second toggle within 350ms keeps the window open.
+    if (open && now - openedAt.current < 350) return;
+    openedAt.current = now;
     const rect = buttonRef.current?.getBoundingClientRect();
     if (rect) {
       const viewportHeight = window.innerHeight;
-      const placeAbove = rect.bottom + 620 > viewportHeight && rect.top > 620;
+      const placeAbove = rect.bottom + 480 > viewportHeight && rect.top > 480;
       setAnchor({ x: rect.right, y: placeAbove ? rect.top : rect.bottom, top: placeAbove });
     }
     setOpen((previous) => !previous);
@@ -220,21 +244,14 @@ export function SidebarWidget({ wide, rpc }: { wide: boolean; rpc: RpcCall }) {
         )}
       </div>
       {open && anchor && overview && (
-        <SafeBoundary fallback={null}>
-          <Popover
-            anchor={anchor}
-            onClose={() => setOpen(false)}
-            rpc={rpc}
-            providerId={providerId}
-          />
-        </SafeBoundary>
+        <FloatWindow anchor={anchor} onClose={() => setOpen(false)} rpc={rpc} providerId={providerId} />
       )}
       {open && !overview && error && <div className="bm-empty">{error}</div>}
     </SafeBoundary>
   );
 }
 
-function Popover({
+function FloatWindow({
   anchor,
   onClose,
   rpc,
@@ -252,6 +269,34 @@ function Popover({
   const [month, setMonth] = useState(new Date().getMonth());
   const [spinning, setSpinning] = useState(false);
   const [showAllSessions, setShowAllSessions] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const [pos, setPos] = useState<{ x: number; y: number }>(() => {
+    const saved = loadWindowPrefs();
+    if (saved) return { x: saved.x, y: saved.y };
+    const viewportHeight = window.innerHeight;
+    return anchor.top
+      ? { x: anchor.x + 10, y: Math.max(12, anchor.y - 420) }
+      : { x: anchor.x + 10, y: Math.min(viewportHeight - 460, anchor.y + 10) };
+  });
+  const [size, setSize] = useState<{ w: number; h: number }>(() => {
+    const saved = loadWindowPrefs();
+    return {
+      w: saved?.w ?? 380,
+      h: saved?.h ?? Math.min(640, Math.max(480, window.innerHeight - 120)),
+    };
+  });
+  const [dragging, setDragging] = useState(false);
+  const [resizing, setResizing] = useState(false);
+  const dragState = useRef<{ dx: number; dy: number } | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(WIN_KEY, JSON.stringify({ x: pos.x, y: pos.y, w: size.w, h: size.h }));
+    } catch {
+      /* ignore */
+    }
+  }, [pos, size]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -260,6 +305,46 @@ function Popover({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  const startDrag = (event: React.PointerEvent) => {
+    if (event.button !== 0) return;
+    dragState.current = { dx: event.clientX - pos.x, dy: event.clientY - pos.y };
+    setDragging(true);
+    event.preventDefault();
+  };
+  const startResize = (event: React.PointerEvent) => {
+    if (event.button !== 0) return;
+    dragState.current = { dx: event.clientX, dy: event.clientY };
+    setResizing(true);
+    event.preventDefault();
+  };
+  useEffect(() => {
+    if (!dragging && !resizing) return;
+    const onMove = (event: PointerEvent) => {
+      if (!dragState.current) return;
+      if (dragging) {
+        setPos({
+          x: Math.min(Math.max(8, event.clientX - dragState.current.dx), window.innerWidth - 120),
+          y: Math.min(Math.max(8, event.clientY - dragState.current.dy), window.innerHeight - 80),
+        });
+      } else {
+        const w = Math.max(MIN_W, Math.min(window.innerWidth - 20, event.clientX - dragState.current.dx));
+        const h = Math.max(MIN_H, Math.min(window.innerHeight - 20, event.clientY - dragState.current.dy));
+        setSize({ w, h });
+      }
+    };
+    const onUp = () => {
+      setDragging(false);
+      setResizing(false);
+      dragState.current = null;
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    return () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+    };
+  }, [dragging, resizing]);
 
   if (!overview) return null;
 
@@ -300,22 +385,95 @@ function Popover({
     setMonth(next.getMonth());
   };
 
-  const shownSessions = showAllSessions ? sessions : sessions.slice(0, 6);
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  const roots = sessions
+    .filter((session) => !session.parentSession || !byId.has(session.parentSession))
+    .sort((a, b) => (b.lastEvent ?? 0) - (a.lastEvent ?? 0));
+  const childrenOf = (id: string) =>
+    sessions
+      .filter((session) => session.parentSession === id)
+      .sort((a, b) => (b.lastEvent ?? 0) - (a.lastEvent ?? 0));
+  const toggleExpand = (id: string) => {
+    setExpanded((previous) => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const visibleRoots = showAllSessions ? roots : roots.slice(0, 6);
+  const totalGroups = roots.length;
   const now = new Date();
   const isCurrentMonth = year === now.getFullYear() && month === now.getMonth();
+
+  const renderSessionDetail = (session: SessionRow) => (
+    <div className="bm-session-detail">
+      <div className="bm-session-detail-row">
+        <span>{session.id.slice(0, 8)}</span>
+        <span>{currency}{fmtMoney(session.cost)}</span>
+      </div>
+      <div className="bm-session-detail-row">
+        <span>{i18n("reqLabel")} {session.requests} {i18n("req")}</span>
+        <span>{fmtTokens(session.tokens.uncached + session.tokens.cacheRead + session.tokens.output)} tokens</span>
+      </div>
+      <div className="bm-session-chips">
+        {Object.entries(session.models).map(([id, count]) => (
+          <span key={id}><i style={{ background: modelColor(id) }} />{id} ×{count}</span>
+        ))}
+      </div>
+    </div>
+  );
+
+  const renderGroup = (root: SessionRow) => {
+    const children = childrenOf(root.id);
+    const hasChildren = children.length > 0;
+    const isOpen = expanded.has(root.id);
+    return (
+      <div className="bm-session-group" key={root.id}>
+        <div
+          className="bm-list-row"
+          role="button"
+          tabIndex={0}
+          onClick={() => (hasChildren ? toggleExpand(root.id) : undefined)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && hasChildren) toggleExpand(root.id);
+          }}
+        >
+          {hasChildren ? (
+            <svg className="bm-session-chevron" data-open={isOpen || undefined} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 3.5l4.5 4.5L6 12.5" />
+            </svg>
+          ) : (
+            <span className="bm-session-chevron bm-session-leaf" />
+          )}
+          <div className="bm-list-row-main">
+            <span className="bm-list-title">{root.title || root.id.slice(0, 8)}</span>
+            <span className="bm-list-sub">
+              {root.lastEvent ? new Date(root.lastEvent).toLocaleString() : ""} · {i18n("reqLabel")} {root.requests} {i18n("req")}
+              {hasChildren ? ` · ${children.length} ${i18n("subSessions")}` : ""}
+            </span>
+          </div>
+          <span className="bm-list-cost">{currency}{fmtMoney(root.cost)}</span>
+        </div>
+        {isOpen && (
+          <div className="bm-session-children">
+            {renderSessionDetail(root)}
+            {children.map((child) => renderGroup(child))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return createPortal(
     <div
       className="bm-popover"
-      style={
-        anchor.top
-          ? { left: anchor.x + 10, bottom: Math.max(8, window.innerHeight - anchor.y + 10) }
-          : { left: anchor.x + 10, top: anchor.y + 10 }
-      }
+      data-size={size.w < 350 ? "narrow" : size.w < 460 ? "mid" : "wide"}
+      style={{ left: pos.x, top: pos.y, width: size.w, height: size.h }}
       role="dialog"
       aria-label={i18n("name")}
     >
-      <div className="bm-pop-header">
+      <div className="bm-pop-header" onPointerDown={startDrag} title={i18n("dragHint")}>
         <span className="bm-provider-chip">
           <select
             className="bm-pop-select"
@@ -324,6 +482,7 @@ function Popover({
               setProvider(event.target.value);
               void refreshAll(rpc);
             }}
+            onPointerDown={(event) => event.stopPropagation()}
           >
             {displayOptions.map((id) => (
               <option key={id} value={id}>
@@ -338,19 +497,19 @@ function Popover({
           <i />{peak === "peak" ? i18n("peakFull") : i18n("offpeakFull")}
         </span>
         <span style={{ flex: 1 }} />
-        <button type="button" className="bm-iconbtn" onClick={() => void doRefresh()} disabled={spinning} aria-label={i18n("refresh")} title={i18n("refresh")}>
+        <button type="button" className="bm-iconbtn" onClick={() => void doRefresh()} disabled={spinning} aria-label={i18n("refresh")} title={i18n("refresh")} onPointerDown={(event) => event.stopPropagation()}>
           <RefreshIcon spinning={spinning} />
         </button>
-        <button type="button" className="bm-iconbtn" onClick={openSettingsSection} aria-label={i18n("openSettings")} title={i18n("openSettings")}>
+        <button type="button" className="bm-iconbtn" onClick={openSettingsSection} aria-label={i18n("openSettings")} title={i18n("openSettings")} onPointerDown={(event) => event.stopPropagation()}>
           <GearIcon />
         </button>
-        <button type="button" className="bm-iconbtn" onClick={onClose} aria-label="close" title="close">
+        <button type="button" className="bm-iconbtn" onClick={onClose} aria-label="close" title="close" onPointerDown={(event) => event.stopPropagation()}>
           <CloseIcon />
         </button>
       </div>
 
       <div className="bm-pop-body">
-        <div className="bm-card">
+        <Card>
           <div className="bm-card-head">
             <span className="bm-card-label">{PROVIDER_LABELS[provider] ?? provider}</span>
             {(prov as { fetchedAt?: number })?.fetchedAt ? (
@@ -380,9 +539,9 @@ function Popover({
               </span>
             </>
           )}
-        </div>
+        </Card>
 
-        <div className="bm-card">
+        <Card>
           <span className="bm-card-label">{i18n("tokensTotal")}</span>
           <span className="bm-big bm-big-mid">{fmtTokens(totalTokens)}</span>
           <span className="bm-model-chips">
@@ -393,7 +552,7 @@ function Popover({
               </span>
             ))}
           </span>
-        </div>
+        </Card>
 
         {todayModels.length > 0 && (
           <div className="bm-models">
@@ -402,7 +561,7 @@ function Popover({
               const share = overview.totals.cost > 0 ? Math.min(1, stat.cost / overview.totals.cost) : 0;
               const cacheRate = tokens > 0 ? (stat.cacheRead ?? 0) / tokens : 0;
               return (
-                <div className="bm-card" key={id}>
+                <Card key={id}>
                   <div className="bm-card-head">
                     <span className="bm-model-name"><i style={{ background: modelColor(id) }} />{id}</span>
                     <span className="bm-model-tag">{i18n("today")}</span>
@@ -416,20 +575,20 @@ function Popover({
                     <span>{i18n("quotaShare")} {Math.round(share * 100)}%</span>
                     <span>{i18n("cacheHitRate")} {Math.round(cacheRate * 100)}%</span>
                   </div>
-                </div>
+                </Card>
               );
             })}
           </div>
         )}
 
-        <div className="bm-card">
-          <div className="bm-row">
-            <span>{i18n("today")}</span>
-            <span>{currency}{fmtMoney(today.cost)} · {today.requests} {i18n("req")}</span>
-          </div>
+        <Card>
           <div className="bm-row">
             <span>{i18n("totalCost")}</span>
-            <span>{currency}{fmtMoney(overview.totals.cost)} · {overview.totals.requests} {i18n("req")}</span>
+            <span>{currency}{fmtMoney(overview.totals.cost)} · {i18n("reqLabel")} {overview.totals.requests} {i18n("req")}</span>
+          </div>
+          <div className="bm-row">
+            <span>{i18n("today")}</span>
+            <span>{currency}{fmtMoney(today.cost)} · {i18n("reqLabel")} {today.requests} {i18n("req")}</span>
           </div>
           {enabledLimits.map((row) => (
             <div key={row.key} className="bm-row">
@@ -447,14 +606,14 @@ function Popover({
               </div>
             </div>
           ))}
-        </div>
+        </Card>
 
-        <div className="bm-card">
+        <Card>
           <span className="bm-cal-title">{i18n("history7")}</span>
           <BarChart daily={history?.daily ?? {}} days={7} />
-        </div>
+        </Card>
 
-        <div className="bm-card">
+        <Card>
           <div className="bm-months">
             <button type="button" className="bm-iconbtn" onClick={() => shiftMonth(-1)} aria-label="previous">
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M10 3.5L5.5 8l4.5 4.5" /></svg>
@@ -466,12 +625,12 @@ function Popover({
           </div>
           <MonthHeatmap daily={history?.daily ?? {}} year={year} month={month} />
           <span className="bm-note">{i18n("heatNote")}</span>
-        </div>
+        </Card>
 
-        <div className="bm-card">
+        <Card>
           <div className="bm-row">
-            <span className="bm-cal-title">{i18n("sessions")} ({sessions.length})</span>
-            {sessions.length > 6 && (
+            <span className="bm-cal-title">{i18n("sessions")} ({totalGroups})</span>
+            {totalGroups > 6 && (
               <button
                 type="button"
                 className="bm-iconbtn"
@@ -484,27 +643,19 @@ function Popover({
               </button>
             )}
           </div>
-          {shownSessions.length === 0 ? (
+          {visibleRoots.length === 0 ? (
             <span className="bm-empty">{i18n("noSessions")}</span>
           ) : (
             <div className="bm-list">
-              {shownSessions.map((session) => (
-                <div className="bm-list-row" key={session.id} title={session.id}>
-                  <div className="bm-list-row-main">
-                    <span className="bm-list-title">{session.title || session.id.slice(0, 8)}</span>
-                    <span className="bm-list-sub">
-                      {session.lastEvent ? new Date(session.lastEvent).toLocaleString() : ""} · {session.requests} {i18n("req")}
-                    </span>
-                  </div>
-                  <span className="bm-list-cost">{currency}{fmtMoney(session.cost)}</span>
-                </div>
-              ))}
+              {visibleRoots.map((root) => renderGroup(root))}
             </div>
           )}
-        </div>
+        </Card>
 
         <span className="bm-note">{i18n("settingsHint")}</span>
       </div>
+
+      <span className="bm-pop-resize" onPointerDown={startResize} title={i18n("resizeHint")} />
     </div>,
     document.body,
   );

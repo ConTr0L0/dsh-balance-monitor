@@ -111,6 +111,7 @@ export function MonthHeatmap({
     const cost = entry?.cost ?? 0;
     const ratio = max > 0 ? cost / max : 0;
     const isToday = isThisMonth && day === today.getDate();
+    const column = (leading + day - 1) % 7;
     const style = cost > 0
       ? { background: `color-mix(in srgb, var(--dsw-alias-button-primary-fill, var(--dsw-alias-label-primary)) ${Math.round(12 + ratio * 88)}%, transparent)` }
       : undefined;
@@ -119,6 +120,7 @@ export function MonthHeatmap({
         className="bm-heat-cell"
         data-spent={cost > 0 || undefined}
         data-today={isToday || undefined}
+        data-side={column >= 4 ? "left" : undefined}
         data-tip={`${key}  ¥${fmtMoney(cost)}${entry ? ` · ${entry.requests} req` : ""}`}
         key={key}
         style={style}
@@ -132,13 +134,16 @@ export function MonthHeatmap({
 
 /**
  * Per-day stacked token-usage bars (segments = models).
+ * @param visibleModels - optional model-id whitelist (empty = all).
  */
 export function StackedBarChart({
   daily,
   days,
+  visibleModels,
 }: {
   daily: Record<string, DayStat>;
   days: number;
+  visibleModels?: string[];
 }) {
   const today = new Date();
   const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (days - 1));
@@ -146,7 +151,7 @@ export function StackedBarChart({
   for (const entry of Object.values(daily)) {
     for (const id of Object.keys(entry.models ?? {})) modelIdsSet.add(id);
   }
-  const modelIds = [...modelIdsSet];
+  const modelIds = [...modelIdsSet].filter((id) => visibleModels === undefined || visibleModels.includes(id));
   const buckets: { key: string; label: string; values: number[]; total: number }[] = [];
   let max = 0;
   for (let i = 0; i < days; i += 1) {
@@ -192,11 +197,14 @@ export function StackedBarChart({
 }
 
 /**
- * All-time model-usage donut with legend (tokens + share). */
-export function DonutChart({ models }: { models: Record<string, ModelStat> }) {
+ * All-time model-usage donut with legend (tokens + share).
+ * @param visibleModels - optional model-id whitelist (empty = all).
+ */
+export function DonutChart({ models, visibleModels }: { models: Record<string, ModelStat>; visibleModels?: string[] }) {
   const rows = Object.entries(models)
     .map(([id, stat]) => ({ id, tokens: modelTokens(stat), cost: stat.cost }))
     .filter((row) => row.tokens > 0)
+    .filter((row) => visibleModels === undefined || visibleModels.length === 0 || visibleModels.includes(row.id))
     .sort((a, b) => b.tokens - a.tokens);
   const total = rows.reduce((sum, row) => sum + row.tokens, 0);
   if (total <= 0 || rows.length === 0) {

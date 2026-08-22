@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ConfigValue, DayStat, History, ModelStat, Overview, RpcCall, SecretSlot } from "./api";
 import { t as i18n } from "./locales";
-import { MonthHeatmap, StackedBarChart, DonutChart } from "./charts";
+import { MonthHeatmap, StackedBarChart, DonutChart, modelColor } from "./charts";
 
 interface LimitDraft {
   enabled: boolean;
@@ -28,6 +28,7 @@ interface Draft {
   display: {
     provider: string;
     field: "total" | "available";
+    visibleModels: string[];
     showBalance: boolean;
     showToday: boolean;
     showRemaining: boolean;
@@ -59,6 +60,7 @@ function toDraft(value: Record<string, unknown>): Draft {
     display: {
       provider: String(displayIn.provider ?? "deepseek"),
       field: displayIn.field === "available" ? "available" : "total",
+      visibleModels: Array.isArray(displayIn.visibleModels) ? displayIn.visibleModels.map(String) : [],
       showBalance: displayIn.showBalance !== false,
       showToday: displayIn.showToday !== false,
       showRemaining: displayIn.showRemaining !== false,
@@ -223,6 +225,19 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
   const now = new Date();
   const statIsCurrent = statMonthYear.year === now.getFullYear() && statMonthYear.month === now.getMonth();
 
+  const allModelIds = Object.keys(overview?.models ?? {});
+  const visibleModels = draft.display.visibleModels;
+  const filteredModels = visibleModels.length > 0 ? visibleModels : allModelIds;
+  const toggleModel = (modelId: string) => {
+    mutate((c) => {
+      const current = c.display.visibleModels;
+      const nextSet = new Set(current.length > 0 ? current : allModelIds);
+      if (nextSet.has(modelId)) nextSet.delete(modelId);
+      else nextSet.add(modelId);
+      return { ...c, display: { ...c.display, visibleModels: [...nextSet] } };
+    });
+  };
+
   return (
     <div className="bm-settings">
       <div className="bm-group bm-stats-group">
@@ -257,14 +272,28 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
             ))}
           </span>
         </div>
+        <div className="bm-model-filter">
+          <span className="bm-card-label">{i18n("modelFilter")}</span>
+          {allModelIds.map((id) => (
+            <button
+              type="button"
+              key={id}
+              className="bm-filter-chip"
+              data-on={filteredModels.includes(id) || undefined}
+              onClick={() => toggleModel(id)}
+            >
+              <i style={{ background: modelColor(id) }} />{id}
+            </button>
+          ))}
+        </div>
         <div className="bm-stacked-card">
-          <StackedBarChart daily={(history?.daily ?? {}) as Record<string, DayStat>} days={rangeDays} />
+          <StackedBarChart daily={(history?.daily ?? {}) as Record<string, DayStat>} days={rangeDays} visibleModels={filteredModels} />
         </div>
       </div>
 
       <div className="bm-group">
         <span className="bm-group-title">{i18n("modelUsage")}</span>
-        <DonutChart models={(overview?.models ?? {}) as Record<string, ModelStat>} />
+        <DonutChart models={(overview?.models ?? {}) as Record<string, ModelStat>} visibleModels={filteredModels} />
       </div>
 
       <div className="bm-group">

@@ -56,6 +56,7 @@ export interface Overview {
   display: {
     provider: string;
     field: "total" | "available";
+    visibleModels: string[];
     showBalance: boolean;
     showToday: boolean;
     showRemaining: boolean;
@@ -80,6 +81,7 @@ export interface SessionRow {
   requests: number;
   firstEvent: number;
   lastEvent: number;
+  parentSession: string;
   tokens: { uncached: number; cacheRead: number; output: number };
   models: Record<string, number>;
 }
