@@ -35,6 +35,20 @@ export interface LimitRow {
   progress: number;
 }
 
+export interface ModelStat {
+  requests: number;
+  input: number;
+  cacheRead: number;
+  output: number;
+  cost: number;
+}
+
+export interface DayStat {
+  cost: number;
+  requests: number;
+  models: Record<string, ModelStat>;
+}
+
 export interface Overview {
   enabled: boolean;
   refreshInterval: number;
@@ -48,8 +62,9 @@ export interface Overview {
     showPeak: boolean;
     showRefresh: boolean;
   };
-  today: { cost: number; requests: number };
+  today: DayStat;
   totals: { cost: number; requests: number };
+  models: Record<string, ModelStat>;
   lastEventAt: number;
   limits: LimitRow[];
   peak: { status: "peak" | "off-peak"; windows: string[][]; offPeakFactor: number };
@@ -70,7 +85,7 @@ export interface SessionRow {
 }
 
 export interface History {
-  daily: Record<string, { cost: number; requests: number }>;
+  daily: Record<string, DayStat>;
   totals: { cost: number; requests: number };
 }
 

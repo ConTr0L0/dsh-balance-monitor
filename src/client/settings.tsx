@@ -1,15 +1,18 @@
 /**
- * Settings card for dsh-balance-monitor (DSH Settings → 余额监控).
+ * Settings page for dsh-balance-monitor (DSH Settings → 余额监控).
  *
- * Auto-saves (debounced); secret fields are write-only through
+ * Top: consumption dashboard (month heatmap + daily per-model stacked token
+ * bars with 7/14/30-day ranges + model-usage donut). Below: configuration —
+ * auto-saves (debounced); secret fields are write-only through
  * config/setSecret so values never cross the wire. Billing rules are NOT
- * exposed — they are verified automatically from the official docs and only
- * reported as a sync status; provider keys are one merged column; rare
- * settings (base URLs) live in a collapsible "Advanced" group.
+ * exposed — verified automatically from the official docs and reported only
+ * as a sync status; provider keys are one merged column; rare settings
+ * (base URLs) live in a collapsible "Advanced" group.
  */
 import { useEffect, useRef, useState } from "react";
-import type { ConfigValue, Overview, RpcCall, SecretSlot } from "./api";
+import type { ConfigValue, DayStat, History, ModelStat, Overview, RpcCall, SecretSlot } from "./api";
 import { t as i18n } from "./locales";
+import { MonthHeatmap, StackedBarChart, DonutChart } from "./charts";
 
 interface LimitDraft {
   enabled: boolean;
@@ -121,7 +124,21 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
   const [revision, setRevision] = useState(0);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [overview, setOverview] = useState<Overview | null>(null);
+  const [history, setHistory] = useState<History | null>(null);
+  const [statMonthYear, setStatMonthYear] = useState(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() };
+  });
+  const [rangeDays, setRangeDays] = useState<7 | 14 | 30>(7);
+  const [errorDetail, setErrorDetail] = useState("");
   const saveTimer = useRef<number | null>(null);
+  const secretTimer = useRef<number | null>(null);
+  const secretQueue = useRef<Promise<void>>(Promise.resolve());
+
+  const showError = (error: unknown) => {
+    setErrorDetail(error instanceof Error ? error.message : String(error));
+    setSaveState("error");
+  };
 
   const load = async () => {
     try {
@@ -129,18 +146,23 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
       setDraft(toDraft((config.value ?? {}) as Record<string, unknown>));
       setSecrets(config.secrets ?? []);
       setRevision(config.revision);
-      setSaveState("idle");
       const overviewData = await rpc<Overview>("overview");
       setOverview(overviewData);
-    } catch {
-      setSaveState("error");
+      const historyData = await rpc<History>("history");
+      setHistory(historyData);
+      setSaveState("idle");
+    } catch (error) {
+      showError(error);
     }
   };
 
   useEffect(() => {
     void load();
+    const poll = window.setInterval(() => void load(), 60_000);
     return () => {
+      window.clearInterval(poll);
       if (saveTimer.current !== null) clearTimeout(saveTimer.current);
+      if (secretTimer.current !== null) clearTimeout(secretTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rpc]);
@@ -162,20 +184,27 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
       await rpc("config/patch", { patch: toPatch(draft), revision });
       await load();
       setSaveState("saved");
-    } catch {
-      setSaveState("error");
+    } catch (error) {
+      showError(error);
     }
   };
 
-  const saveSecret = async (provider: string, value: string) => {
-    setSaveState("saving");
-    try {
-      await rpc("config/setSecret", { path: ["providers", provider, "apiKey"], value, revision });
-      await load();
-      setSaveState("saved");
-    } catch {
-      setSaveState("error");
-    }
+  /** Secret writes are debounced and serialized: typing fires one onChange
+   *  per keystroke and concurrent setSecret calls raced each other's
+   *  revision → SettingsConflictError ("保存失败"). */
+  const queueSecret = (provider: string, value: string) => {
+    if (secretTimer.current !== null) clearTimeout(secretTimer.current);
+    secretTimer.current = window.setTimeout(() => {
+      secretTimer.current = null;
+      secretQueue.current = secretQueue.current
+        .then(async () => {
+          setSaveState("saving");
+          await rpc("config/setSecret", { path: ["providers", provider, "apiKey"], value, revision });
+          await load();
+          setSaveState("saved");
+        })
+        .catch((error) => showError(error));
+    }, 600);
   };
 
   const secretSet = (provider: string) => {
@@ -187,8 +216,57 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
     return <div className="bm-empty">{i18n("loading")}</div>;
   }
 
+  const shiftStatMonth = (delta: number) => {
+    const next = new Date(statMonthYear.year, statMonthYear.month + delta, 1);
+    setStatMonthYear({ year: next.getFullYear(), month: next.getMonth() });
+  };
+  const now = new Date();
+  const statIsCurrent = statMonthYear.year === now.getFullYear() && statMonthYear.month === now.getMonth();
+
   return (
     <div className="bm-settings">
+      <div className="bm-group bm-stats-group">
+        <span className="bm-group-title">{i18n("consumptionStats")}</span>
+        <div className="bm-months">
+          <button type="button" className="bm-iconbtn" onClick={() => shiftStatMonth(-1)} aria-label="previous">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M10 3.5L5.5 8l4.5 4.5" /></svg>
+          </button>
+          <span>{statMonthYear.year} / {String(statMonthYear.month + 1).padStart(2, "0")}</span>
+          <button type="button" className="bm-iconbtn" onClick={() => shiftStatMonth(1)} disabled={statIsCurrent} aria-label="next">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 3.5l4.5 4.5L6 12.5" /></svg>
+          </button>
+        </div>
+        <MonthHeatmap daily={(history?.daily ?? {}) as Record<string, DayStat>} year={statMonthYear.year} month={statMonthYear.month} />
+        <span className="bm-note">{i18n("heatNote")}</span>
+      </div>
+
+      <div className="bm-group">
+        <div className="bm-stats-head">
+          <span className="bm-group-title">{i18n("dailyTokens")}</span>
+          <span className="bm-tabs">
+            {([7, 14, 30] as const).map((days) => (
+              <button
+                type="button"
+                key={days}
+                className="bm-tab"
+                data-active={rangeDays === days || undefined}
+                onClick={() => setRangeDays(days)}
+              >
+                {days} {i18n("daysUnit")}
+              </button>
+            ))}
+          </span>
+        </div>
+        <div className="bm-stacked-card">
+          <StackedBarChart daily={(history?.daily ?? {}) as Record<string, DayStat>} days={rangeDays} />
+        </div>
+      </div>
+
+      <div className="bm-group">
+        <span className="bm-group-title">{i18n("modelUsage")}</span>
+        <DonutChart models={(overview?.models ?? {}) as Record<string, ModelStat>} />
+      </div>
+
       <div className="bm-group">
         <div className="bm-toggle">
           <span>{i18n("enable")}</span>
@@ -226,7 +304,7 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
                 placeholder={secretSet(id) ? i18n("keySet") : i18n("keyUnset")}
                 value=""
                 onChange={(event) => {
-                  if (event.target.value) void saveSecret(id, event.target.value);
+                  if (event.target.value) queueSecret(id, event.target.value);
                   event.target.value = "";
                 }}
               />
@@ -371,8 +449,14 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
       </details>
 
       <div className="bm-save">
-        <span className="bm-save-hint">
-          {saveState === "saving" ? i18n("saving") : saveState === "saved" ? i18n("saved") : saveState === "error" ? i18n("saveError") : ""}
+        <span className="bm-save-hint" data-error={saveState === "error" || undefined}>
+          {saveState === "saving"
+            ? i18n("saving")
+            : saveState === "saved"
+              ? i18n("saved")
+              : saveState === "error"
+                ? `${i18n("saveError")}${errorDetail ? ` · ${errorDetail}` : ""}`
+                : ""}
         </span>
         {saveState === "error" ? (
           <button type="button" className="bm-dashed" style={{ borderStyle: "solid" }} onClick={() => void save()}>
