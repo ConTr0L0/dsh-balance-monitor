@@ -607,6 +607,29 @@ function FloatWindow({
         </Card>
 
         <Card>
+          <div className="bm-row">
+            <span>{i18n("today")}</span>
+            <span>{currency}{fmtMoney(today.cost)} · {i18n("reqLabel")} {today.requests} {i18n("req")}</span>
+          </div>
+          {enabledLimits.map((row) => (
+            <div key={row.key} className="bm-row">
+              <span>{i18n(row.labelKey) ?? row.key}</span>
+              <span data-warn={row.exceeded || undefined}>
+                {fmtMoney(row.current)} / {row.key === "requests" ? `${row.value} ${i18n("req")}` : `${currency}${fmtMoney(row.value)}`}
+              </span>
+              <div
+                className="bm-progress-lg"
+                data-warn={row.exceeded || undefined}
+                data-critical={(row.action === "block" && row.exceeded) || undefined}
+                style={{ flex: "none", width: 72 }}
+              >
+                <i style={{ width: `${Math.round(row.progress * 100)}%` }} />
+              </div>
+            </div>
+          ))}
+        </Card>
+
+        <Card>
           <span className="bm-card-label">{i18n("tokensTotal")}</span>
           <span className="bm-big bm-big-mid">{fmtTokens(totalTokens)}</span>
           <span className="bm-model-chips">
@@ -645,29 +668,6 @@ function FloatWindow({
             })}
           </div>
         )}
-
-        <Card>
-          <div className="bm-row">
-            <span>{i18n("today")}</span>
-            <span>{currency}{fmtMoney(today.cost)} · {i18n("reqLabel")} {today.requests} {i18n("req")}</span>
-          </div>
-          {enabledLimits.map((row) => (
-            <div key={row.key} className="bm-row">
-              <span>{i18n(row.labelKey) ?? row.key}</span>
-              <span data-warn={row.exceeded || undefined}>
-                {fmtMoney(row.current)} / {row.key === "requests" ? `${row.value} ${i18n("req")}` : `${currency}${fmtMoney(row.value)}`}
-              </span>
-              <div
-                className="bm-progress-lg"
-                data-warn={row.exceeded || undefined}
-                data-critical={(row.action === "block" && row.exceeded) || undefined}
-                style={{ flex: "none", width: 72 }}
-              >
-                <i style={{ width: `${Math.round(row.progress * 100)}%` }} />
-              </div>
-            </div>
-          ))}
-        </Card>
 
         <Card>
           <span className="bm-cal-title">{i18n("history7")}</span>
