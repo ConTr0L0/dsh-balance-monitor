@@ -58,7 +58,7 @@ After installing, **fully restart DSH** (Quit from the tray on desktop; refresh 
 - Source: DSH session logs (`$DSH_HOME/sessions/.../session.jsonl.zstd`), parsed incrementally. DSH writes the same session content into several session files (parent / child-session copies), so the plugin **deduplicates by the unique `assistant/message` `message.id`** before billing — without this, every completion is counted up to 6×.
 - Per LLM request: uncached input at the `input` rate, cache-hit input at the `cacheHit` rate (0.10 CNY / 1M), output at the `output` rate (per 1M tokens). The usage fields are disjoint (`inputTokens` is the uncached part; `cacheReadTokens` is the cache-hit part).
 - This billing rule was verified item-by-item against the DeepSeek platform daily bill (2026-08-22): flash within 0.3%, total within ~5% — the residual comes from failed/interrupted requests that are billed but never written to the session logs.
-- Requests inside a peak window are priced at the table rate; otherwise multiplied by the off-peak factor (0.5).
+- Requests inside a peak window are priced at the table rate; otherwise multiplied by the off-peak factor (0.5). **Current official rule (effective 2026-08-23): peak windows are Beijing time Mon–Fri 09:00–12:00 & 14:00–18:00; weekends (Sat/Sun) are all-day off-peak** — parsed automatically with the daily price sync.
 - Only `deepseek-official` traffic is counted (other gateways such as Aliyun/Zhipu/Xiaomi are excluded).
 - The price table is auto-verified daily from the official DeepSeek docs; unknown models fall back to built-in defaults (flash rates). No manual configuration needed.
 
