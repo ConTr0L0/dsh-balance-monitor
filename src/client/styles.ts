@@ -16,7 +16,7 @@ const CSS = `
 .bm-widget-rail{flex-direction:column;align-items:center;justify-content:center;gap:8px;width:36px;height:84px;min-width:36px;max-width:36px;padding:10px 0}
 .bm-rail-trend{display:grid;place-items:center;width:18px;height:18px}
 .bm-rail-trend>i{width:9px;height:9px;border-radius:50%;background:var(--dsw-alias-state-success-primary,var(--dsw-alias-label-secondary))}
-.bm-rail-trend[data-status="peak"]>i{background:var(--dsw-alias-state-warning-primary,var(--dsw-alias-label-secondary))}
+.bm-rail-trend[data-status="peak"]>i{background:var(--dsw-alias-state-warning-primary,#D97706)}
 .bm-rail-balance{font-size:9px;font-weight:600;letter-spacing:.01em;color:var(--dsw-alias-label-primary);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .bm-rail-balance[data-warn="true"]{color:var(--dsw-alias-state-warning-primary,var(--dsw-alias-label-secondary))}
 .bm-rail-balance[data-critical="true"]{color:var(--dsw-alias-state-error-primary)}
@@ -28,8 +28,8 @@ const CSS = `
 /* peak/off-peak oval tag (left of the plate) */
 .bm-trend{flex:none;display:inline-flex;align-items:center;gap:4px;font-size:10px;line-height:1;padding:4px 8px;border-radius:999px;white-space:nowrap}
 .bm-trend>i{width:5px;height:5px;border-radius:50%;background:currentColor}
-.bm-trend[data-status="off-peak"]{color:var(--dsw-alias-state-success-primary,var(--dsw-alias-label-secondary));background:color-mix(in srgb,var(--dsw-alias-state-success-primary,var(--dsw-alias-label-secondary)) 12%,transparent)}
-.bm-trend[data-status="peak"]{color:var(--dsw-alias-state-warning-primary,var(--dsw-alias-label-secondary));background:color-mix(in srgb,var(--dsw-alias-state-warning-primary,var(--dsw-alias-label-secondary)) 16%,transparent)}
+.bm-trend[data-status="off-peak"]{color:var(--dsw-alias-state-success-primary,#16A34A);background:color-mix(in srgb,var(--dsw-alias-state-success-primary,#16A34A) 12%,transparent)}
+.bm-trend[data-status="peak"]{color:var(--dsw-alias-state-warning-primary,#D97706);background:color-mix(in srgb,var(--dsw-alias-state-warning-primary,#D97706) 16%,transparent)}
 /* bottom quota strip inside the plate */
 .bm-strip{position:absolute;left:14px;right:14px;bottom:5px;height:3px;border-radius:99px;background:color-mix(in srgb,var(--dsw-alias-label-primary) 14%,transparent);overflow:hidden;pointer-events:none}
 .bm-strip>i{display:block;height:100%;background:var(--dsw-alias-label-primary);border-radius:99px}
