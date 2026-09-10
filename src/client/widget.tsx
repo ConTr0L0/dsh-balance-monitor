@@ -128,6 +128,8 @@ export function SidebarWidget({ wide, rpc }: { wide: boolean; rpc: RpcCall }) {
   const buttonRef = useRef<HTMLDivElement>(null);
   const [spinning, setSpinning] = useState(false);
   const openedAt = useRef(0);
+  /** Last stats-only poll (see the freshness effect below). */
+  const lastStatsPoll = useRef(0);
 
   const display = overview?.display;
   const providerId = (display?.provider ?? "deepseek") as ProviderId;
@@ -149,6 +151,29 @@ export function SidebarWidget({ wide, rpc }: { wide: boolean; rpc: RpcCall }) {
     const timer = setInterval(() => void refreshAll(rpc), (overview?.refreshInterval ?? 60) * 1000);
     return () => clearInterval(timer);
   }, [rpc, overview?.refreshInterval]);
+
+  /**
+   * Stats-only freshness. The host folds every completion into its ledger as it
+   * settles, so the figures only lag by this poll. `refreshAll` coalesces
+   * concurrent callers (module-scope inflight) and this only re-asks after the
+   * guard interval, so the panel's own open-time fetch is never duplicated.
+   * The provider balances intentionally stay on the heavier `refreshInterval`.
+   */
+  useEffect(() => {
+    if (!rpc) return;
+    const refreshStatsSoon = () => {
+      const now = Date.now();
+      if (now - lastStatsPoll.current < 4000) return;
+      lastStatsPoll.current = now;
+      void refreshAll(rpc);
+    };
+    const timer = window.setInterval(refreshStatsSoon, 6000);
+    document.addEventListener("visibilitychange", refreshStatsSoon);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshStatsSoon);
+    };
+  }, [rpc]);
 
   const openPanel = () => {
     const now = Date.now();
