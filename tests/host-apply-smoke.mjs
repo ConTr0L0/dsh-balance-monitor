@@ -51,7 +51,7 @@ const { apply } = await import(fromProfile("lib/index.js"));
 if (typeof apply !== "function") throw new Error("host half does not export apply()");
 apply(ctx, {});
 
-const { loadState, statePath } = await import(fromProfile("lib/store.js"));
+const { loadState, statePath, STATE_VERSION } = await import(fromProfile("lib/store.js"));
 const readLedger = () => loadState(SANDBOX_HOME).sessions["session-smoke-live"];
 
 const checks = [];
@@ -98,7 +98,7 @@ checks.push(["accumulated a positive cost", (persisted?.cost ?? 0) > 0]);
 checks.push(["global totals followed the session", loadState(SANDBOX_HOME).totals.requests === 2]);
 checks.push(["state.json exists and parses", (() => {
   try {
-    return loadState(SANDBOX_HOME).version === 7;
+    return loadState(SANDBOX_HOME).version === STATE_VERSION;
   } catch {
     return false;
   }
