@@ -6,10 +6,11 @@
  *  B) event stream fed from the SAME real events, after A → must add nothing
  *  C) event stream only, fresh state → must equal A exactly
  *  D) live-then-rescan           → must not double count either
- * Uses the real plugin modules, real pricing table, and real session logs.
+ * Uses the real plugin modules, real pricing table, and real session logs
+ * (legacy session.jsonl.zstd AND 0.1.5's session.v3.jsonl.zstd, discovered via
+ * the production listSessionFiles).
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { zstdDecompressSync } from "node:zlib";
 import { foldEvent, createSessionState, syncSessionFile, listSessionFiles } from "../lib/sessions.js";
 import { emptyState } from "../lib/store.js";
@@ -41,7 +42,7 @@ function events(file) {
 function scanAll(state) {
   for (const entry of listSessionFiles(root)) {
     const session = state.sessions[entry.id] ?? (state.sessions[entry.id] = createSessionState(entry.id, entry.workspace));
-    syncSessionFile(session, state, prices, entry.file);
+    syncSessionFile(session, state, prices, entry.file, entry.fileName);
   }
 }
 
@@ -51,15 +52,10 @@ function feedLive(state, file, id) {
   for (const ev of events(file)) foldEvent(session, state, ev, prices);
 }
 
-const files = [];
-for (const ws of readdirSync(root, { withFileTypes: true })) {
-  if (!ws.isDirectory()) continue;
-  for (const s of readdirSync(join(root, ws.name), { withFileTypes: true })) {
-    if (!s.isDirectory()) continue;
-    const f = join(root, ws.name, s.name, "session.jsonl.zstd");
-    try { statSync(f); files.push({ id: s.name, file: f }); } catch {}
-  }
-}
+// Production discovery: every supported log file of every session.
+const files = listSessionFiles(root);
+const v3Count = files.filter((e) => e.fileName === "session.v3.jsonl.zstd").length;
+const legacyCount = files.length - v3Count;
 
 const snap = (state) => ({
   cost: +state.totals.cost.toFixed(6),
@@ -95,6 +91,7 @@ const checks = [
   ["C == A (live-only equals scan-only)", same(C, A), C, A],
   ["D == A (live-then-scan equals scan-only)", same(D, A), D, A],
 ];
+console.log(`log files: ${files.length} (v3: ${v3Count}, legacy: ${legacyCount})`);
 console.log("A baseline (scan):        ", JSON.stringify(A));
 console.log("B scan + live replay:     ", JSON.stringify(B));
 console.log("C live only:              ", JSON.stringify(C));
