@@ -56,7 +56,8 @@ dsh plugin --profile web add dsh-balance-monitor
 ## 成本计算说明
 
 - 数据来源：DSH 会话日志（`$DSH_HOME/sessions/.../session.jsonl.zstd`），按次增量解析。DSH 会把同一会话内容写入多个 session 文件（父/子会话副本），插件按 `assistant/message` 的唯一 `message.id` 去重后再计费。
-- 每次 LLM 请求：未命中输入按 `input` 单价、缓存命中按 `cacheHit` 单价（0.1 元/百万）、输出按 `output` 单价（每百万 token）。该口径已与 DeepSeek 平台每日账单逐项对账验证（2026-08-22：flash 误差 0.3%，总量误差约 5%，残差来自失败/中断请求的不可见计费）。
+- 每次 LLM 请求：未命中输入按 `input` 单价、缓存命中按 `cacheHit` 单价、输出按 `output` 单价（均为高峰价，每百万 token）。现行官方价（2026-09-10 价目页）：`deepseek-flash` 命中 0.04 / 未命中 2 / 输出 8，`deepseek-v4-pro` 命中 0.30 / 未命中 9 / 输出 27。该口径已与 DeepSeek 平台每日账单逐项对账验证（2026-08-22：flash 误差 0.3%，总量误差约 5%，残差来自失败/中断请求的不可见计费）。
+- 官方公告：北京时间 2026-09-14 12:00 起至 V4.1 Pro 上线前，`deepseek-v4-pro` 请求全部路由到 V4.1 Flash 并按 Flash 价格计费——插件按请求时间自动跟随该切换，旧模型名（`deepseek-v4-flash` 等）与临时 id（如 `deepseek-v4.1-flash-expires-on-0910`）一律按 Flash 价计费。
 - 请求发生在高峰窗口内按价目表原价，否则乘以「谷时折扣」（0.5）。**现行官方规则（2026-08-23 起）：高峰时段为北京时间周一至周五 9:00–12:00、14:00–18:00，周末（周六、周日）全天按低谷价**；规则随每日价目同步自动解析。
 - **价目表由插件每日自动验证**（`lib/pricing.js`，源：DeepSeek 官方文档页），未知模型走内置默认价（flash 价），无需手动配置。
 
