@@ -169,6 +169,7 @@ export function PricingChangeNotice({ rpc }: { rpc: RpcCall }) {
       <PrimitivesModal
         open
         onClose={dismiss}
+        className="bm-notice-dialog"
         title={t("noticeTitle")}
         closeLabel={t("noticeClose")}
         description={description}
@@ -223,7 +224,7 @@ function FallbackModal({ title, description, onClose, footer, children }: {
         aria-label={title}
         onClick={(event) => event.stopPropagation()}
         style={{
-          width: "min(560px, 92vw)", background: "var(--dsw-alias-bg-layer-1, #fff)", borderRadius: 16,
+          width: "min(640px, 94vw)", background: "var(--dsw-alias-bg-layer-1, #fff)", borderRadius: 16,
           boxShadow: "0 24px 64px rgba(15,18,25,.28), 0 2px 8px rgba(15,18,25,.12)",
           overflow: "hidden", color: "var(--dsw-alias-label-primary, #14161a)",
           fontFamily: "inherit",
