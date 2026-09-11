@@ -212,6 +212,13 @@ const CSS = `
 .bm-notice-rule{display:flex;align-items:baseline;gap:12px}
 .bm-notice-rule-label{color:var(--dsw-alias-label-secondary);flex:none;min-width:9em}
 .bm-notice-rule-value{display:inline-flex;gap:6px;align-items:baseline}
+/* fallback modal chrome (host primitives unavailable) */
+.bm-notice-fallback-title{font-size:15.5px;font-weight:600;margin:0;letter-spacing:.01em}
+.bm-notice-fallback-desc{margin-top:8px;font-size:12.5px;line-height:1.65;color:var(--dsw-alias-label-secondary,#6b7280)}
+.bm-notice-fallback-footer{display:flex;justify-content:flex-end;padding:10px 22px 18px}
+.bm-notice-ack{appearance:none;border:0;cursor:pointer;background:var(--dsw-alias-interactive-bg-primary,var(--dsw-alias-label-primary,#14161a));color:var(--dsw-alias-label-on-accent,#fff);border-radius:999px;padding:7px 20px;font-size:12.5px;font-weight:500;letter-spacing:.02em}
+.bm-notice-ack:hover:not(:disabled){filter:brightness(1.15)}
+.bm-notice-ack:disabled{opacity:.55;cursor:default}
 `;
 
 let injected = false;

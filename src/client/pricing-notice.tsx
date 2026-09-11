@@ -9,9 +9,11 @@
  *
  * The Modal/Button primitives come from the host's client-module table
  * (`@deepseek-ai/dsh-client-ui-primitives`). The require is wrapped so a
- * missing module silently disables the popup instead of breaking the widget.
+ * missing module falls back to a self-contained modal instead of breaking
+ * the widget or silently swallowing the notice.
  */
-import { useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { getSnapshot, refreshAll, subscribe } from "./store";
 import { t } from "./locales";
 import type { PriceTriple, PricingNotice, RpcCall } from "./api";
@@ -77,7 +79,7 @@ export function PricingChangeNotice({ rpc }: { rpc: RpcCall }) {
   const notice = overview?.pricingNotice ?? null;
   const [busy, setBusy] = useState(false);
 
-  if (!notice || !PrimitivesModal || !PrimitivesButton || !rpc) return null;
+  if (!notice || !rpc) return null;
 
   const dismiss = async () => {
     if (busy) return;
@@ -109,67 +111,142 @@ export function PricingChangeNotice({ rpc }: { rpc: RpcCall }) {
   }
 
   const when = new Date(notice.fetchedAt).toLocaleString();
-
-  return (
-    <PrimitivesModal
-      open
-      onClose={dismiss}
-      title={t("noticeTitle")}
-      closeLabel={t("noticeClose")}
-      description={`${t("noticeDesc")} (${t("updated")} ${when})`}
-      footer={
-        <PrimitivesButton variant="primary" size="sm" onClick={dismiss} disabled={busy}>
-          {t("noticeAck")}
-        </PrimitivesButton>
-      }
-    >
-      <div className="bm-notice">
-        {rows.length > 0 ? (
-          <table className="bm-notice-table">
-            <thead>
-              <tr>
-                <th>{t("noticeColModel")}</th>
-                <th>{t("noticeColHit")}</th>
-                <th>{t("noticeColMiss")}</th>
-                <th>{t("noticeColOut")}</th>
+  const description = `${t("noticeDesc")} (${t("updated")} ${when})`;
+  const body = (
+    <div className="bm-notice">
+      {rows.length > 0 ? (
+        <table className="bm-notice-table">
+          <thead>
+            <tr>
+              <th>{t("noticeColModel")}</th>
+              <th>{t("noticeColHit")}</th>
+              <th>{t("noticeColMiss")}</th>
+              <th>{t("noticeColOut")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id}>
+                <td>
+                  <span className="bm-notice-model">{row.id}</span>
+                  {row.status !== "changed" && (
+                    <span className="bm-notice-tag" data-kind={row.status}>{row.status === "added" ? t("noticeAdded") : t("noticeRemoved")}</span>
+                  )}
+                </td>
+                <td><PriceCell before={row.prev.cacheHit} after={row.next.cacheHit} /></td>
+                <td><PriceCell before={row.prev.input} after={row.next.input} /></td>
+                <td><PriceCell before={row.prev.output} after={row.next.output} /></td>
               </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.id}>
-                  <td>
-                    <span className="bm-notice-model">{row.id}</span>
-                    {row.status !== "changed" && (
-                      <span className="bm-notice-tag" data-kind={row.status}>{row.status === "added" ? t("noticeAdded") : t("noticeRemoved")}</span>
-                    )}
-                  </td>
-                  <td><PriceCell before={row.prev.cacheHit} after={row.next.cacheHit} /></td>
-                  <td><PriceCell before={row.prev.input} after={row.next.input} /></td>
-                  <td><PriceCell before={row.prev.output} after={row.next.output} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <div className="bm-notice-nomodels">{t("noticeNoModels")}</div>
-        )}
-
-        {rules.length > 0 && (
-          <div className="bm-notice-rules">
-            <div className="bm-notice-rules-title">{t("noticeRulesTitle")}</div>
-            {rules.map((rule) => (
-              <div className="bm-notice-rule" key={rule.key}>
-                <span className="bm-notice-rule-label">{rule.label}</span>
-                <span className="bm-notice-rule-value">
-                  <s className="bm-notice-old">{rule.before}</s>
-                  <span aria-hidden="true">→</span>
-                  <span className="bm-notice-new" data-changed="true">{rule.after}</span>
-                </span>
-              </div>
             ))}
+          </tbody>
+        </table>
+      ) : (
+        <div className="bm-notice-nomodels">{t("noticeNoModels")}</div>
+      )}
+
+      {rules.length > 0 && (
+        <div className="bm-notice-rules">
+          <div className="bm-notice-rules-title">{t("noticeRulesTitle")}</div>
+          {rules.map((rule) => (
+            <div className="bm-notice-rule" key={rule.key}>
+              <span className="bm-notice-rule-label">{rule.label}</span>
+              <span className="bm-notice-rule-value">
+                <s className="bm-notice-old">{rule.before}</s>
+                <span aria-hidden="true">→</span>
+                <span className="bm-notice-new" data-changed="true">{rule.after}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  // Host primitives available → themed Modal; otherwise a self-contained
+  // fallback so the notice can never be silently swallowed.
+  if (PrimitivesModal && PrimitivesButton) {
+    return (
+      <PrimitivesModal
+        open
+        onClose={dismiss}
+        title={t("noticeTitle")}
+        closeLabel={t("noticeClose")}
+        description={description}
+        footer={
+          <PrimitivesButton variant="primary" size="sm" onClick={dismiss} disabled={busy}>
+            {t("noticeAck")}
+          </PrimitivesButton>
+        }
+      >
+        {body}
+      </PrimitivesModal>
+    );
+  }
+  return (
+    <FallbackModal
+      title={t("noticeTitle")}
+      description={description}
+      onClose={dismiss}
+      footer={<button type="button" className="bm-notice-ack" onClick={dismiss} disabled={busy}>{t("noticeAck")}</button>}
+    >
+      {body}
+    </FallbackModal>
+  );
+}
+
+/** Self-contained modal used when the host primitives module is unavailable. */
+function FallbackModal({ title, description, onClose, footer, children }: {
+  title: string;
+  description: string;
+  onClose: () => void;
+  footer: ReactNode;
+  children: ReactNode;
+}) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+  return createPortal(
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 9999, display: "grid", placeItems: "center",
+        background: "rgba(15,18,25,.45)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)",
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onClick={(event) => event.stopPropagation()}
+        style={{
+          width: "min(560px, 92vw)", background: "var(--dsw-alias-bg-layer-1, #fff)", borderRadius: 16,
+          boxShadow: "0 24px 64px rgba(15,18,25,.28), 0 2px 8px rgba(15,18,25,.12)",
+          overflow: "hidden", color: "var(--dsw-alias-label-primary, #14161a)",
+          fontFamily: "inherit",
+        }}
+      >
+        <div style={{ padding: "20px 22px 6px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <h2 className="bm-notice-fallback-title">{title}</h2>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={t("noticeClose")}
+              style={{ appearance: "none", border: 0, background: "none", cursor: "pointer", width: 26, height: 26, borderRadius: 8, color: "var(--dsw-alias-label-tertiary, #9aa1ad)", fontSize: 13 }}
+            >
+              ✕
+            </button>
           </div>
-        )}
+          <p className="bm-notice-fallback-desc">{description}</p>
+          <div style={{ padding: "14px 0 4px" }}>{children}</div>
+        </div>
+        <div className="bm-notice-fallback-footer">{footer}</div>
       </div>
-    </PrimitivesModal>
+    </div>,
+    document.body,
   );
 }
