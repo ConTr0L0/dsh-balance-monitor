@@ -9,6 +9,7 @@
  */
 import { Component, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { PricingChangeNotice } from "./pricing-notice";
 import { t as i18n } from "./locales";
 import { fmtMoney, fmtTokens, modelTokens, modelColor, BarChart, MonthHeatmap } from "./charts";
 import { getSnapshot, manualRefresh, refreshAll, subscribe } from "./store";
@@ -292,6 +293,8 @@ export function SidebarWidget({ wide, rpc }: { wide: boolean; rpc: RpcCall }) {
           </>
         )}
       </div>
+      {/* One-shot official pricing-change popup (portal; acks on dismiss). */}
+      <PricingChangeNotice rpc={rpc} />
       {open && anchor && overview && (
         <FloatWindow anchor={anchor} onClose={() => setOpen(false)} rpc={rpc} providerId={providerId} />
       )}

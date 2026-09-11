@@ -49,6 +49,30 @@ export interface DayStat {
   models: Record<string, ModelStat>;
 }
 
+/** One model's peak-price triple (CNY / 1M tokens). */
+export interface PriceTriple {
+  input: number;
+  cacheHit: number;
+  output: number;
+}
+
+/** A synced snapshot of the official price table (see lib/pricing.js). */
+export interface PricingSnapshot {
+  source: string;
+  fetchedAt: number;
+  models: Record<string, PriceTriple>;
+  peakWindows: string[][];
+  offPeakFactor: number;
+  weekendOffPeak: boolean;
+}
+
+/** Pending pricing-change popup payload: the table before and after a change. */
+export interface PricingNotice {
+  fetchedAt: number;
+  old: PricingSnapshot;
+  new: PricingSnapshot;
+}
+
 export interface Overview {
   enabled: boolean;
   refreshInterval: number;
@@ -70,6 +94,7 @@ export interface Overview {
   limits: LimitRow[];
   peak: { status: "peak" | "off-peak"; windows: string[][]; offPeakFactor: number };
   pricing: { source: string; fetchedAt: number; modelCount: number };
+  pricingNotice: PricingNotice | null;
   savedAt: number;
 }
 
