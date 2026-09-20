@@ -53,6 +53,33 @@ check("legacy flash id falls to Flash default", DEFAULT_MODEL_PRICE.input === 2 
 const legacyCost = requestCost(usage, "deepseek-v4.1-flash-expires-on-0910", beforeCutoff, pricing).cost;
 check("temp id v4.1-flash-expires-on-0910 → Flash price", Math.abs(legacyCost - 2.0) < 1e-9, String(legacyCost));
 
+// 4) 2026-09 footnote reword: weekends stay off-peak, Chinese holidays join them
+const live = readFileSync(join(here, "fixtures", "official-pricing-2026-09-20.html"), "utf8");
+const livePricing = parsePricingHtml(live);
+check("reworded page parses", livePricing !== null, livePricing === null ? "parsePricingHtml returned null" : "");
+if (livePricing) {
+  check("reworded page -> weekends still off-peak", livePricing.weekendOffPeak === true, String(livePricing.weekendOffPeak));
+  check("reworded page -> holidays off-peak", livePricing.holidayOffPeak === true, String(livePricing.holidayOffPeak));
+  check("reworded page -> peak windows unchanged", JSON.stringify(livePricing.peakWindows) === JSON.stringify([["09:00", "12:00"], ["14:00", "18:00"]]), JSON.stringify(livePricing.peakWindows));
+  check("reworded page -> prices unchanged", JSON.stringify(livePricing.models) === JSON.stringify(pricing.models), JSON.stringify(livePricing.models));
+}
+
+// One flat 1M-token input call on deepseek-flash: 2.0 CNY peak / 1.0 CNY off-peak.
+const oneM = { inputTokens: 1_000_000, cacheReadTokens: 0, outputTokens: 0 };
+const ruleset = { ...pricing, weekendOffPeak: true, holidayOffPeak: true };
+const priceAt = (iso, prices = ruleset) => requestCost(oneM, "deepseek-flash", Date.parse(iso), prices).cost;
+const expectPrice = (label, iso, want) => {
+  const got = priceAt(iso);
+  check(label, Math.abs(got - want) < 1e-9, String(got));
+};
+expectPrice("Mon 2026-09-21 10:00 -> peak 2.0", "2026-09-21T10:00:00+08:00", 2.0);
+expectPrice("Sun 2026-09-20 (调休上班) 10:00 -> off-peak 1.0", "2026-09-20T10:00:00+08:00", 1.0);
+expectPrice("Thu 2026-10-01 (国庆) 10:00 -> off-peak 1.0", "2026-10-01T10:00:00+08:00", 1.0);
+expectPrice("Mon 2026-10-05 (国庆) 10:00 -> off-peak 1.0", "2026-10-05T10:00:00+08:00", 1.0);
+expectPrice("Thu 2026-02-19 (春节) 10:00 -> off-peak 1.0", "2026-02-19T10:00:00+08:00", 1.0);
+expectPrice("Thu 2026-10-08 (节后工作日) 10:00 -> peak 2.0", "2026-10-08T10:00:00+08:00", 2.0);
+check("holidayOffPeak=false disables the exemption", Math.abs(priceAt("2026-10-01T10:00:00+08:00", { ...ruleset, holidayOffPeak: false }) - 2.0) < 1e-9, String(priceAt("2026-10-01T10:00:00+08:00", { ...ruleset, holidayOffPeak: false })));
+
 let failed = 0;
 for (const [label, ok, detail] of checks) {
   console.log(`${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : `  (${detail})`}`);

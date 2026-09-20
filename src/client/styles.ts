@@ -25,6 +25,8 @@ const CSS = `
 .bm-secondary{font-size:11px;color:var(--dsw-alias-label-secondary);white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .bm-primary[data-warn="true"],.bm-secondary[data-warn="true"]{color:var(--dsw-alias-state-warning-primary,var(--dsw-alias-label-secondary))}
 .bm-primary[data-critical="true"],.bm-critical{color:var(--dsw-alias-state-error-primary)!important}
+/* last known balance: keep the number readable, mark it as not fresh */
+.bm-primary[data-stale="true"],.bm-rail-balance[data-stale="true"]{opacity:.68}
 /* peak/off-peak oval tag (left of the plate) */
 .bm-trend{flex:none;display:inline-flex;align-items:center;gap:4px;font-size:10px;line-height:1;padding:4px 8px;border-radius:999px;white-space:nowrap}
 .bm-trend>i{width:5px;height:5px;border-radius:50%;background:currentColor}

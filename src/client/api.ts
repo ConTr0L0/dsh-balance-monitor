@@ -7,7 +7,18 @@ export type ProviderId = "deepseek" | "zhipu" | "openrouter" | "tavily";
 
 export interface ProviderBalance {
   ok: boolean;
+  /** When the published figures were actually fetched (last success). */
   fetchedAt?: number;
+  /** When the host last tried to poll (even if that attempt failed). */
+  attemptedAt?: number;
+  /** When the last failed poll happened. */
+  failedAt?: number;
+  /** Attempts the host spent on the last poll. */
+  attempts?: number;
+  /** False when the failure was authoritative (HTTP error), not transport. */
+  retryable?: boolean;
+  /** True when the figures are the last known ones — the latest poll failed. */
+  stale?: boolean;
   configured?: boolean;
   currency?: string;
   total?: number;
@@ -64,6 +75,8 @@ export interface PricingSnapshot {
   peakWindows: string[][];
   offPeakFactor: number;
   weekendOffPeak: boolean;
+  /** Since 2026-09: Chinese statutory holidays are off-peak all day. */
+  holidayOffPeak?: boolean;
 }
 
 /** Pending pricing-change popup payload: the table before and after a change. */

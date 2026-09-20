@@ -108,6 +108,9 @@ export function PricingChangeNotice({ rpc }: { rpc: RpcCall }) {
     if (oldRules.weekendOffPeak !== newRules.weekendOffPeak) {
       rules.push({ key: "weekendOffPeak", label: t("ruleWeekend"), before: t(oldRules.weekendOffPeak ? "on" : "off"), after: t(newRules.weekendOffPeak ? "on" : "off") });
     }
+    if (oldRules.holidayOffPeak !== newRules.holidayOffPeak) {
+      rules.push({ key: "holidayOffPeak", label: t("ruleHoliday"), before: t(oldRules.holidayOffPeak ? "on" : "off"), after: t(newRules.holidayOffPeak ? "on" : "off") });
+    }
   }
 
   const when = new Date(notice.fetchedAt).toLocaleString();

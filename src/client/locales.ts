@@ -40,6 +40,7 @@ const zh: Record<string, string> = {
   granted: "赠送",
   toppedUp: "充值",
   updated: "更新于",
+  staleHint: "最近一次刷新失败，显示的是上次成功的余额",
   req: "次",
   totalCost: "累计消耗",
   quotaTotal: "总金额",
@@ -114,6 +115,7 @@ const zh: Record<string, string> = {
   rulePeakWindows: "高峰时段",
   ruleOffPeakFactor: "空闲价系数",
   ruleWeekend: "周末全天空闲价",
+  ruleHoliday: "中国法定节假日全天空闲价",
   on: "开",
   off: "关",
 };
@@ -148,6 +150,7 @@ const en: Record<string, string> = {
   granted: "granted",
   toppedUp: "top-up",
   updated: "updated",
+  staleHint: "Latest refresh failed — showing the last successful balance",
   req: "req",
   totalCost: "Total spend",
   quotaTotal: "Total amount",
@@ -222,6 +225,7 @@ const en: Record<string, string> = {
   rulePeakWindows: "Peak hours",
   ruleOffPeakFactor: "Off-peak factor",
   ruleWeekend: "Weekends all-day off-peak",
+  ruleHoliday: "Chinese statutory holidays all-day off-peak",
   on: "on",
   off: "off",
 };

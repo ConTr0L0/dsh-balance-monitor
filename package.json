@@ -1,6 +1,6 @@
 {
   "name": "dsh-balance-monitor",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "DSH plugin: real-time API balance in the sidebar with provider switching (DeepSeek / Zhipu GLM / OpenRouter / Tavily), peak/off-peak pricing, per-session and daily cost tracking, and configurable spending limits.",
   "type": "module",
   "main": "lib/index.js",
@@ -44,6 +44,8 @@
     "lib/store.js",
     "lib/invariant.js",
     "lib/client.js",
+    "lib/pricing.js",
+    "lib/holidays.js",
     "lib/types/**/*.d.ts",
     "cordis.patch.yml",
     "README.md",

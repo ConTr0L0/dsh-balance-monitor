@@ -205,6 +205,10 @@ export function SidebarWidget({ wide, rpc }: { wide: boolean; rpc: RpcCall }) {
       ? i18n("noKey")
       : `${currency}${fmtMoney(primary)}`;
 
+  /** A failed poll keeps the last known balance (`stale`), it does not blank it. */
+  const balanceStale = provider?.ok === false && typeof primary === "number";
+  const plateTitle = balanceStale ? `${i18n("name")} · ${i18n("staleHint")}` : i18n("name");
+
   return (
     <SafeBoundary fallback={<span className="bm-empty">—</span>}>
       <div
@@ -223,7 +227,7 @@ export function SidebarWidget({ wide, rpc }: { wide: boolean; rpc: RpcCall }) {
             openPanel();
           }
         }}
-        title={i18n("name")}
+        title={plateTitle}
       >
         {wide ? (
           <>
@@ -238,6 +242,7 @@ export function SidebarWidget({ wide, rpc }: { wide: boolean; rpc: RpcCall }) {
                   className="bm-primary"
                   data-warn={anyLimitExceeded || undefined}
                   data-critical={anyBlocked || undefined}
+                  data-stale={balanceStale || undefined}
                 >
                   {balanceLabel}
                 </span>
@@ -286,6 +291,7 @@ export function SidebarWidget({ wide, rpc }: { wide: boolean; rpc: RpcCall }) {
                 className="bm-rail-balance"
                 data-warn={anyLimitExceeded || undefined}
                 data-critical={anyBlocked || undefined}
+                data-stale={balanceStale || undefined}
               >
                 {balanceLabel}
               </span>
@@ -418,6 +424,14 @@ function FloatWindow({
     .slice(0, 3);
   const providerTotal = providerPrimary(prov, "total");
   const quotaProgress = providerTotal && providerTotal > 0 ? Math.min(1, overview.totals.cost / providerTotal) : 0;
+  /** Failed poll: an error with the last successful figures still on screen. */
+  const providerError =
+    prov?.ok === false
+      ? (prov as { error?: string }).error === "no-api-key"
+        ? i18n("noKey")
+        : ((prov as { error?: string }).error ?? null)
+      : null;
+  const hasBalance = typeof primary === "number";
   const todayModels = Object.entries(today.models ?? {})
     .map(([id, stat]) => ({ id, stat }))
     .filter((row) => row.stat.cost > 0 || modelTokens(row.stat) > 0)
@@ -629,16 +643,23 @@ function FloatWindow({
               <span className="bm-card-meta">{i18n("updated")} {timeAgo((prov as { fetchedAt: number }).fetchedAt)}</span>
             ) : null}
           </div>
-          {prov?.ok === false ? (
+          {providerError !== null && !hasBalance ? (
             <>
               <span className="bm-big" data-warn>—</span>
-              <span className="bm-note">
-                {(prov as { error?: string }).error === "no-api-key" ? i18n("noKey") : (prov as { error?: string }).error}
-              </span>
+              <span className="bm-note">{providerError}</span>
             </>
           ) : (
             <>
               <span className="bm-big">{currency}{fmtMoney(primary)}</span>
+              {providerError !== null ? (
+                <span className="bm-note">
+                  {i18n("staleHint")}
+                  {typeof (prov as { fetchedAt?: number })?.fetchedAt === "number" &&
+                  (prov as { fetchedAt: number }).fetchedAt > 0
+                    ? ` · ${i18n("updated")} ${timeAgo((prov as { fetchedAt: number }).fetchedAt)}`
+                    : ""}
+                </span>
+              ) : null}
               <div className="bm-quota-grid">
                 <div><span>{i18n("quotaTotal")}</span><strong>{currency}{fmtMoney(providerTotal)}</strong></div>
                 <div><span>{i18n("quotaSpent")}</span><strong>{currency}{fmtMoney(overview.totals.cost)}</strong></div>
