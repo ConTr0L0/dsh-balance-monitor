@@ -21,7 +21,6 @@ function apply(ctx: {
     register: (ns: string, dict: { zh: Record<string, string>; en: Record<string, string> }) => () => void;
     getSnapshot: () => { active: string };
   };
-  connection: { rpc: { call: (...args: unknown[]) => Promise<unknown> } };
   slots: {
     inject: (key: string, factory: () => () => void) => () => void;
   };
@@ -31,7 +30,9 @@ function apply(ctx: {
   attachLocale(ctx.locale);
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), "dsh-balance-monitor: dictionaries");
 
-  const rpc = createRpc(ctx.connection);
+  // The host half serves its own fenced route (lib/rpc.js); no client service is
+  // needed beyond the same-origin fetch the caller performs.
+  const rpc = createRpc();
 
   ctx.effect(() => {
     const disposer = ctx.slots.inject(
@@ -74,6 +75,6 @@ function apply(ctx: {
 }
 
 /** Services the client entry requires (order-independent fiber waiting). */
-const inject = ["slots", "locale", "connection"];
+const inject = ["slots", "locale"];
 
 export { apply, inject };

@@ -4,13 +4,16 @@ English | [中文](README.md)
 
 A DeepSeek Harness plugin that shows your API account balance in real time in the left sidebar, with multi-provider balance detection, peak/off-peak pricing, per-session and daily cost tracking, and configurable spending limits. Works on both the web GUI and the desktop app (they run the same code).
 
-> **Compatibility**: 0.4.0 targets **DSH 0.2.0-rc.2** (0.2.0 removed the settings-namespace registry). On 0.1.x stay on 0.3.1.
+> **Compatibility**: 0.4.0 targets **DSH 0.2.0-rc.2**. On 0.1.x stay on 0.3.1.
 
 ## 0.4.0 — DSH 0.2.0-rc.2 port
 
-- **Preferences are the plugin's own Config**: no more `settingsNamespace()` + `settings.register()`. Reads and writes are addressed by the **profile entry id** (`balance-monitor`) and persist through `settings.update(ns, patch, revision)` into the profile patch; secrets still leave the host only through DSH's `role("secret")` redaction.
+0.2.0 removed three things this plugin relied on; each has a replacement:
+
+- **Client channel**: 0.2.0 no longer gives profile plugins the `connection` service, so `connection.rpc.handle()` silently did nothing and the browser got **HTTP 405** from the static handler. The host now mounts a Host/Origin + loopback fenced `POST /dsh-balance-monitor/<endpoint>` prefix route through `ctx.webServer.register()`, and the client calls it with a same-origin `fetch` (`lib/rpc.js`).
+- **Preference storage**: 0.2.0's settings service projects only the entries its own config editor admits, and an out-of-tree bundle row is not one of them (measured on 0.2.0-rc.2: `settings.describe()` never returned this plugin's row and a write threw). Preferences are now persisted by the plugin at `$DSH_HOME/storages/dsh-balance-monitor/prefs.json` (atomic write + revision-based optimistic locking); the settings page works exactly as before.
 - **Client inject fixed**: dropped `@deepseek-ai/dsh-client-runtime`, which no longer exists in 0.2.0 — that entry is why the Plugins page showed the plugin as *abnormal / "this package contains no components"*. Peer ranges moved to `^0.2.0-rc.2`.
-- New `tests/settings-020-port.mjs`: 14 assertions over the settings projection, writes, `SETTINGS_CONFLICT` retry, and secret redaction.
+- New `tests/rpc-prefs-020.mjs`: 15 assertions over the route fence, preference reads/writes, the revision conflict retry, and secret redaction.
 
 ## Features
 

@@ -144,19 +144,26 @@ export class RpcError extends Error {}
 
 export type RpcCall = <T>(endpoint: string, payload?: unknown) => Promise<T>;
 
-/** Build the channel-bound RPC caller for the plugin's connection. */
-export function createRpc(connection: { rpc: { call: (...args: unknown[]) => Promise<unknown> } }): RpcCall {
+/**
+ * Build the channel-bound RPC caller.
+ *
+ * DSH 0.2 no longer hands profile plugins the `connection` service, so the call
+ * is a plain same-origin POST to the fenced prefix route the host half mounts
+ * through `ctx.webServer.register` (see lib/rpc.js). The envelope is unchanged:
+ * `{ ok, value }` or `{ ok: false, error: { message } }`.
+ */
+export function createRpc(): RpcCall {
   const call = async <T>(endpoint: string, payload?: unknown): Promise<T> => {
-    const response = (await connection.rpc.call(
-      "/dsh-balance-monitor",
-      endpoint,
-      payload ?? {},
-    )) as { ok: boolean; value?: T; error?: { message?: string } };
-    if (!response.ok) {
-      const error = new RpcError(response.error?.message ?? `RPC ${endpoint} failed`);
-      throw error;
-    }
-    return response.value as T;
+    const response = await fetch(`/dsh-balance-monitor/${endpoint}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(payload ?? {}),
+    });
+    if (!response.ok) throw new RpcError(`RPC ${endpoint} failed: HTTP ${response.status}`);
+    const body = (await response.json()) as { ok: boolean; value?: T; error?: { message?: string } };
+    if (!body.ok) throw new RpcError(body.error?.message ?? `RPC ${endpoint} failed`);
+    return body.value as T;
   };
   return call;
 }

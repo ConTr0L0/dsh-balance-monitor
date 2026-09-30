@@ -4,13 +4,16 @@
 
 DSH（DeepSeek Harness）插件：在左侧任务栏实时显示 API 账户余额，支持多平台余额检测、峰谷计价、会话/每日消耗统计与可配置的消耗上限。同时适配 Web 端与桌面端（两者运行同一份代码）。
 
-> **兼容性**：0.4.0 起适配 **DSH 0.2.0-rc.2**（0.2.0 移除了 settings 命名空间注册表）。仍在 0.1.x 上请用 0.3.1。
+> **兼容性**：0.4.0 起适配 **DSH 0.2.0-rc.2**。仍在 0.1.x 上请用 0.3.1。
 
 ## 0.4.0 变更（DSH 0.2.0-rc.2 适配）
 
-- **偏好改挂插件自身 Config**：不再 `settingsNamespace()` + `settings.register()`，改为按 **profile 条目 id**（`balance-monitor`）读写，写入走 `settings.update(ns, patch, revision)`，落盘进 profile patch，重启保留；密钥仍由 DSH 按 `role("secret")` 脱敏后再出网。
-- **客户端 inject 修正**：删掉 0.2.0 已不存在的 `@deepseek-ai/dsh-client-runtime`（这是插件在插件页显示「异常 / 这个插件包不包含任何组件」的原因），peer 依赖同步到 `^0.2.0-rc.2`。
-- 新增 `tests/settings-020-port.mjs`：14 项断言覆盖 settings 投影、写入、`SETTINGS_CONFLICT` 重试与密钥脱敏。
+0.2.0 拆掉了插件用到的三样东西，逐条替换：
+
+- **客户端通道**：0.2.0 不再把 `connection` 服务交给 profile 插件，`connection.rpc.handle()` 静默失效（浏览器看到的是静态处理的 **HTTP 405**）。改为宿主用 `ctx.webServer.register()` 挂一条带 Host/Origin + loopback 围栏的 `POST /dsh-balance-monitor/<endpoint>` 前缀路由，客户端同源 `fetch` 调用（`lib/rpc.js`）。
+- **偏好存储**：0.2.0 的 settings 只投影它自己的 config editor 认可的条目，profile 装的外部 bundle 行不在其中（实测 `settings.describe()` 不返回本插件行、写入会抛错）。改为插件自己持久化到 `$DSH_HOME/storages/dsh-balance-monitor/prefs.json`（原子写 + revision 乐观锁），设置页交互不变。
+- **客户端 inject**：去掉 0.2.0 已不存在的 `@deepseek-ai/dsh-client-runtime`（这正是插件页显示「异常 / 这个插件包不包含任何组件」的原因），peer 依赖同步到 `^0.2.0-rc.2`。
+- 新增 `tests/rpc-prefs-020.mjs`：15 项断言覆盖路由围栏、偏好读写、revision 冲突重试与密钥脱敏。
 
 ## 功能
 
@@ -81,7 +84,7 @@ node build.mjs                 # 打包 src/client → lib/client.js
 测试（无需 DSH 运行）：
 
 ```bash
-node tests/settings-020-port.mjs    # 0.2 settings 投影 / 写入 / 冲突重试
+node tests/rpc-prefs-020.mjs    # 围栏路由 + 偏好读写 + revision 冲突
 node --preserve-symlinks tests/host-apply-smoke.mjs   # host 半 + 会话计费
 ```
 
@@ -91,9 +94,10 @@ node --preserve-symlinks tests/host-apply-smoke.mjs   # host 半 + 会话计费
 ## 架构
 
 - `cordis.patch.yml`：bundle 挂载声明（`insert` 插件行），由 `dsh plugin add` 自动同步。
-- `lib/index.js`：服务端——会话日志折叠计费、多平台余额轮询、上限拦截（`llm/stream` waterfall）、RPC 通道 `/dsh-balance-monitor`。
+- `lib/index.js`：服务端——会话日志折叠计费、多平台余额轮询、上限拦截（`llm/stream` waterfall）。
+- `lib/rpc.js`：围栏前缀路由（`POST /dsh-balance-monitor/<endpoint>`，Host/Origin + loopback 校验）。
 - `lib/client.js`：客户端 bundle——`sidebar.footer.action`（侧边栏组件）与 `settings.section`（设置卡片）两个插槽注册。
-- 数据存于 `$DSH_HOME/storages/dsh-balance-monitor/state.json`（原子写入）；**偏好即本插件的 Config**（profile 条目 `balance-monitor`，由 DSH settings 投影成表单，密钥脱敏）。
+- 数据：账本 `$DSH_HOME/storages/dsh-balance-monitor/state.json`，偏好 `.../prefs.json`（均为原子写入；密钥只存本地，出网前由 `config/get` 脱敏）。
 
 ## License
 
