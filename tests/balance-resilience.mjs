@@ -83,7 +83,7 @@ const prefs = {
   limits: {},
 };
 const logs = [];
-let rpcHandler = null;
+let route = null;
 
 const settingsSctx = {
   settings: {
@@ -103,14 +103,15 @@ const ctx = {
   on: () => () => {},
   effect: () => () => {},
   inject: (services, callback) => {
-    if (services.includes("connection")) {
+    // DSH 0.2 mounts the client channel as a fenced prefix route on the shared
+    // web server; the account service is deliberately absent here, so this test
+    // keeps exercising the API-key path.
+    if (services.includes("webServer")) {
       return callback({
-        connection: {
-          rpc: {
-            handle: (channel, handler) => {
-              rpcHandler = handler;
-              return () => {};
-            },
+        webServer: {
+          register: (candidate) => {
+            route = candidate;
+            return () => {};
           },
         },
       });
@@ -127,7 +128,24 @@ check("host exposes a retrying balance fetch", typeof fetchProviderBalanceWithRe
 check("host exposes the retry budget", typeof balance.BALANCE_ATTEMPTS === "number");
 
 apply(ctx, {});
-check("rpc channel registered", typeof rpcHandler === "function");
+check("mounts its prefix route", route !== null && typeof route.handler === "function");
+
+/** Drive the real route handler once with fake req/res; returns the envelope. */
+const rpcHandler = async (endpoint, payload) => {
+  const body = JSON.stringify(payload ?? {});
+  const req = {
+    method: "POST",
+    url: `/dsh-balance-monitor/${endpoint}`,
+    headers: { host: "127.0.0.1:19560", "content-type": "application/json" },
+    async *[Symbol.asyncIterator]() {
+      if (body !== "") yield Buffer.from(body);
+    },
+  };
+  let raw = "";
+  const res = { writeHead() {}, end(chunk) { raw = chunk ?? ""; } };
+  await route.handler(req, res);
+  return JSON.parse(raw);
+};
 
 const overview = async () => {
   const response = await rpcHandler("overview", {});

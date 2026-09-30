@@ -20,6 +20,8 @@ export interface ProviderBalance {
   /** True when the figures are the last known ones — the latest poll failed. */
   stale?: boolean;
   configured?: boolean;
+  /** Which credential path produced this entry (DeepSeek only). */
+  source?: "account" | "key";
   currency?: string;
   total?: number;
   available?: number;

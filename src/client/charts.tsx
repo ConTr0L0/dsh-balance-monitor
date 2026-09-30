@@ -3,7 +3,8 @@
  * per-model stacked daily bars, and a model-usage donut. Dependency-free and
  * theme-adaptive via CSS variables.
  */
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import { t as i18n } from "./locales";
 import type { DayStat, ModelStat } from "./api";
 
 /** Format a CNY amount compactly (0.0234 → "0.023"; 1234 → "1,234"). */
@@ -15,12 +16,22 @@ export function fmtMoney(value: number | null | undefined): string {
   return value.toFixed(4);
 }
 
-/** Format a token count in 万/亿 (922774083 → "9.23亿"; 56638 → "5.7万"). */
+/** Compact token counts using the requested Chinese units. */
 export function fmtTokens(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return "0";
-  if (value >= 100_000_000) return `${(value / 100_000_000).toFixed(2)}亿`;
-  if (value >= 10_000) return `${(value / 10_000).toFixed(1)}万`;
-  return Math.round(value).toLocaleString("en-US");
+  for (const [scale, unit] of [[100_000_000, "亿"], [10_000_000, "千万"], [1_000_000, "百万"], [10_000, "万"], [100, "百"]] as const) {
+    if (value >= scale) return String(Number((value / scale).toFixed(2))) + unit;
+  }
+  return String(Math.round(value));
+}
+
+/** Compact chart labels use standard Latin suffixes; heatmap tips keep Chinese units. */
+function fmtChartTokens(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "0";
+  for (const [scale, unit] of [[1_000_000_000, "B"], [1_000_000, "M"], [1_000, "K"]] as const) {
+    if (value >= scale) return String(Number((value / scale).toFixed(2))) + unit;
+  }
+  return String(Math.round(value));
 }
 
 /** Deterministic per-model color (stable hash → palette). */
@@ -81,125 +92,141 @@ export function BarChart({ daily, days = 7 }: { daily: Record<string, DayStat>; 
   );
 }
 
-/**
- * Monthly calendar heatmap. One cell per day; color intensity scales with
- * that day's cost relative to the month maximum; hover shows a tooltip.
- */
-export function MonthHeatmap({
-  daily,
-  year,
-  month,
-}: {
+/** Short ranges end today in the current month, or at the selected month end. */
+export function heatmapRange(year: number, month: number, months = 1, days?: 30 | 90) {
+  const now = new Date();
+  const end = days && year === now.getFullYear() && month === now.getMonth()
+    ? new Date(year, month, now.getDate())
+    : new Date(year, month + 1, 0);
+  const first = days
+    ? new Date(end.getFullYear(), end.getMonth(), end.getDate() - days + 1)
+    : new Date(year, month - months + 1, 1);
+  return { first, end };
+}
+
+/** Calendar activity grid: weekdays run vertically, weeks horizontally. */
+export function MonthHeatmap({ daily, year, month, months = 1, days }: {
   daily: Record<string, DayStat>;
   year: number;
   month: number;
+  months?: number;
+  days?: 30 | 90;
 }) {
-  const first = new Date(year, month, 1);
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const leading = first.getDay();
-  const today = new Date();
-  const isThisMonth = today.getFullYear() === year && today.getMonth() === month;
-
-  let max = 0;
-  for (const key of Object.keys(daily)) {
-    if (key.startsWith(`${year}-${String(month + 1).padStart(2, "0")}-`)) max = Math.max(max, daily[key].cost);
+  const { first, end } = heatmapRange(year, month, months, days);
+  const rows = days ? days / 30 : 7;
+  const start = days ? first : new Date(first.getFullYear(), first.getMonth(), first.getDate() - first.getDay());
+  const labelMonths = (end.getFullYear() - first.getFullYear()) * 12 + end.getMonth() - first.getMonth() + 1;
+  const dates: Date[] = [];
+  // Advance by calendar days so daylight-saving changes cannot shift cells.
+  for (let i = 0; ; i += 1) {
+    const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+    if (date > end && (days || i % 7 === 0)) break;
+    dates.push(date);
   }
-
-  const cells: ReactNode[] = [];
-  for (let i = 0; i < leading; i += 1) {
-    cells.push(<span className="bm-heat-cell bm-heat-empty" key={`empty-${i}`} />);
-  }
-  for (let day = 1; day <= daysInMonth; day += 1) {
-    const date = new Date(year, month, day);
+  const weeks = dates.length / rows;
+  const todayKey = dayKeyOf(new Date());
+  const inRange = dates.filter(date => date >= first && date <= end);
+  const maxCost = Math.max(0, ...inRange.map(date => daily[dayKeyOf(date)]?.cost ?? 0));
+  const cells: ReactNode[] = dates.map((date, index) => {
     const key = dayKeyOf(date);
+    if (date < first || date > end) return <span className="bm-heat-cell bm-heat-empty" key={key} />;
     const entry = daily[key];
     const cost = entry?.cost ?? 0;
-    const ratio = max > 0 ? cost / max : 0;
-    const isToday = isThisMonth && day === today.getDate();
-    const column = (leading + day - 1) % 7;
-    const style = cost > 0
-      ? { background: `color-mix(in srgb, var(--dsw-alias-button-primary-fill, var(--dsw-alias-label-primary)) ${Math.round(12 + ratio * 88)}%, transparent)` }
-      : undefined;
-    cells.push(
-      <span
-        className="bm-heat-cell"
+    const tokens = Object.values(entry?.models ?? {}).reduce((sum, stat) => sum + modelTokens(stat), 0);
+    const unpriced = cost <= 0 && tokens > 0;
+    const tip = key + " · " + i18n("consumption") + " " + (unpriced ? i18n("unpriced") : "¥" + fmtMoney(cost)) + " · Token " + fmtTokens(tokens);
+    return (
+      <span className="bm-heat-cell" key={key}
         data-spent={cost > 0 || undefined}
-        data-today={isToday || undefined}
-        data-side={column >= 4 ? "left" : undefined}
-        data-tip={`${key}  ¥${fmtMoney(cost)}${entry ? ` · ${entry.requests} req` : ""}`}
-        key={key}
-        style={style}
-      >
-        {day}
-      </span>,
+        data-today={key === todayKey || undefined}
+        data-side={Math.floor(index / rows) >= weeks / 2 ? "left" : undefined}
+        data-tip={tip} aria-label={tip} tabIndex={0}
+        style={cost > 0 ? { background: "color-mix(in srgb, var(--bm-heat-accent, #008cff) " + Math.round(25 + cost / maxCost * 75) + "%, var(--dsw-alias-bg-layer-3))" } : undefined}
+      />
     );
-  }
-  return <div className="bm-heat">{cells}</div>;
+  });
+  return (
+    <div className="bm-heat-scroll" data-year={!days && months > 1 || undefined} data-days={days}>
+      <div className="bm-heat-wrap" style={{ "--bm-heat-weeks": weeks, "--bm-heat-rows": rows } as CSSProperties}>
+        <div className="bm-heat">{cells}</div>
+        <div className="bm-heat-months">
+          {Array.from({ length: labelMonths }, (_, index) => {
+            const date = index === 0 ? first : new Date(first.getFullYear(), first.getMonth() + index, 1);
+            const column = Math.floor(dates.findIndex(day => dayKeyOf(day) === dayKeyOf(date)) / rows) + 1;
+            return <span key={dayKeyOf(date)} style={{ gridColumn: column }} title={dayKeyOf(date).slice(0, 7)}>{i18n("heatMonth", { n: date.getMonth() + 1 })}</span>;
+          })}
+        </div>
+      </div>
+    </div>
+  );
 }
 
-/**
- * Per-day stacked token-usage bars (segments = models).
- * @param visibleModels - optional model-id whitelist (empty = all).
- */
-export function StackedBarChart({
-  daily,
-  days,
-  visibleModels,
-}: {
+/** Daily model stacks with a matching token axis and cache-hit-rate line. */
+export function StackedBarChart({ daily, days, visibleModels }: {
   daily: Record<string, DayStat>;
   days: number;
   visibleModels?: string[];
 }) {
   const today = new Date();
   const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (days - 1));
-  const modelIdsSet = new Set<string>();
-  for (const entry of Object.values(daily)) {
-    for (const id of Object.keys(entry.models ?? {})) modelIdsSet.add(id);
-  }
-  const modelIds = [...modelIdsSet].filter((id) => visibleModels === undefined || visibleModels.includes(id));
-  const buckets: { key: string; label: string; values: number[]; total: number }[] = [];
+  const modelIds = [...new Set(Object.values(daily).flatMap(entry => Object.keys(entry.models ?? {})))]
+    .filter(id => visibleModels === undefined || visibleModels.includes(id));
+  const buckets: { key: string; label: string; values: number[]; total: number; rate: number | null }[] = [];
   let max = 0;
   for (let i = 0; i < days; i += 1) {
     const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
     const key = dayKeyOf(date);
     const entry = daily[key];
-    const values = modelIds.map((id) => modelTokens(entry?.models?.[id]));
-    const total = values.reduce((a, b) => a + b, 0);
+    const values = modelIds.map(id => modelTokens(entry?.models?.[id]));
+    const total = values.reduce((sum, value) => sum + value, 0);
+    const cached = modelIds.reduce((sum, id) => sum + (entry?.models?.[id]?.cacheRead ?? 0), 0);
     max = Math.max(max, total);
-    buckets.push({ key, label: dayLabel(date), values, total });
+    buckets.push({ key, label: dayLabel(date), values, total, rate: total > 0 ? Math.min(1, cached / total) : null });
   }
-  // Dense views: nowrap labels can't shrink, so label every 3rd day (anchored
-  // to the last bucket so today always keeps a label) and skip per-column
-  // value text — the hover tooltip still shows the exact number. Columns
-  // without a label keep an invisible spacer so bars stay on a shared baseline.
   const labelEvery = days > 14 ? 3 : 1;
   const labelAnchor = (days - 1) % labelEvery;
-  const showValues = days <= 14;
+  const linePath = buckets.reduce((path, bucket, index) => {
+    if (bucket.rate === null) return path;
+    const point = (index * 100 + 50) + "," + (100 - bucket.rate * 100);
+    return path + (path.endsWith("M") || !path ? "M" : " L") + point;
+  }, "");
+  const ticks = [1, 0.75, 0.5, 0.25, 0].map(fraction => ({ fraction, tokens: max * fraction }));
   return (
-    <div className="bm-chart bm-stacked" data-dense={days > 14 || undefined}>
-      {buckets.map((bucket, index) => {
-        const showLabel = index % labelEvery === labelAnchor;
-        return (
-          <div
-            className="bm-chart-col"
-            key={bucket.key}
-            data-tip={`${bucket.label}  ${fmtTokens(bucket.total)} tokens`}
-          >
-            {showValues && <span className="bm-chart-value">{bucket.total > 0 ? fmtTokens(bucket.total) : ""}</span>}
-            <span className="bm-stack" style={{ height: `${max > 0 ? Math.max(4, (bucket.total / max) * 100) : 2}%` }}>
-              {bucket.values.map((value, index) =>
-                value > 0 ? (
-                  <i
-                    key={modelIds[index]}
-                    style={{ height: `${(value / Math.max(1, bucket.total)) * 100}%`, background: modelColor(modelIds[index]) }}
-                  />
-                ) : null,
-              )}
-            </span>
-            <span className="bm-chart-label">{showLabel ? bucket.label : "\u00A0"}</span>
+    <div className="bm-stacked-chart">
+      <div className="bm-stacked-main">
+        <div className="bm-stacked-axis bm-stacked-axis-left">
+          {ticks.map(tick => <span key={tick.fraction}>{fmtChartTokens(tick.tokens)}</span>)}
+        </div>
+        <div className="bm-stacked-plot">
+          <svg className="bm-stacked-overlay" viewBox={`0 0 ${days * 100} 100`} preserveAspectRatio="none" aria-hidden="true">
+            {[0, 25, 50, 75, 100].map(y => <line key={y} x1="0" y1={y} x2={days * 100} y2={y} className="bm-chart-gridline" />)}
+            {linePath && <path d={linePath} className="bm-cache-line" />}
+          </svg>
+          <div className="bm-chart bm-stacked">
+            {buckets.map((bucket, index) => {
+              const height = max > 0 ? bucket.total / max * 100 : 0;
+              return (
+                <div className="bm-chart-col" key={bucket.key} data-tip={`${bucket.key} · ${fmtChartTokens(bucket.total)} tokens · ${i18n("cacheHitRate")} ${bucket.rate === null ? "—" : Math.round(bucket.rate * 100) + "%"}`}>
+                  <div className="bm-stack-area">
+                    {bucket.total > 0 && <span className="bm-stack" style={{ height: `${height}%` }}>
+                      {bucket.values.map((value, modelIndex) => value > 0 ? <i key={modelIds[modelIndex]} style={{ height: `${value / bucket.total * 100}%`, background: modelColor(modelIds[modelIndex]) }} /> : null)}
+                    </span>}
+                    {days <= 14 && bucket.total > 0 && <span className="bm-chart-value" style={{ bottom: `calc(${height}% + 3px)` }}>{fmtChartTokens(bucket.total)}</span>}
+                  </div>
+                  <span className="bm-chart-label">{index % labelEvery === labelAnchor ? bucket.label : " "}</span>
+                </div>
+              );
+            })}
           </div>
-        );
-      })}
+        </div>
+        <div className="bm-stacked-axis bm-stacked-axis-right">
+          {[100, 75, 50, 25, 0].map((value, index) => <span key={value}>{value}%</span>)}
+        </div>
+      </div>
+      <div className="bm-legend bm-stacked-legend">
+        {modelIds.map(id => <span key={id}><i style={{ background: modelColor(id) }} />{id}</span>)}
+        <span><i className="bm-cache-key" />{i18n("cacheHitRate")}</span>
+      </div>
     </div>
   );
 }

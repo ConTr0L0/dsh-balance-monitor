@@ -64,6 +64,17 @@ function openSettingsSection() {
   }, 600);
 }
 
+/**
+ * Localized copy for a poll failure. The host reports stable codes for the
+ * cases the UI must explain; anything else is shown as it arrived.
+ */
+function failureText(error: string | undefined): string | null {
+  if (error === "no-api-key") return i18n("noKey");
+  if (error === "account-signed-out") return i18n("accountSignedOut");
+  if (error === "account-failed") return i18n("accountFailed");
+  return error ?? null;
+}
+
 /** Inner error boundary: a failed card renders a fallback, never unmounts the window. */
 class SafeBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -201,7 +212,7 @@ export function SidebarWidget({ wide, rpc }: { wide: boolean; rpc: RpcCall }) {
   };
 
   const balanceLabel =
-    provider?.ok === false && provider?.error === "no-api-key"
+    provider?.ok === false && (provider?.error === "no-api-key" || provider?.error === "account-signed-out")
       ? i18n("noKey")
       : `${currency}${fmtMoney(primary)}`;
 
@@ -425,12 +436,9 @@ function FloatWindow({
   const providerTotal = providerPrimary(prov, "total");
   const quotaProgress = providerTotal && providerTotal > 0 ? Math.min(1, overview.totals.cost / providerTotal) : 0;
   /** Failed poll: an error with the last successful figures still on screen. */
-  const providerError =
-    prov?.ok === false
-      ? (prov as { error?: string }).error === "no-api-key"
-        ? i18n("noKey")
-        : ((prov as { error?: string }).error ?? null)
-      : null;
+  const providerError = prov?.ok === false ? failureText((prov as { error?: string }).error) : null;
+  /** Which credential path produced the visible balance (DeepSeek account login). */
+  const providerSource = (prov as { source?: string })?.source === "account" ? i18n("sourceAccountTag") : null;
   const hasBalance = typeof primary === "number";
   const todayModels = Object.entries(today.models ?? {})
     .map(([id, stat]) => ({ id, stat }))
@@ -673,6 +681,7 @@ function FloatWindow({
               </div>
               <span className="bm-note">
                 {i18n("quotaUsed")} {Math.round(quotaProgress * 100)}%
+                {providerSource !== null ? ` · ${providerSource}` : ""}
                 {typeof (prov as { granted?: number })?.granted === "number" ? ` · ${i18n("granted")} ${currency}${fmtMoney((prov as { granted?: number }).granted ?? 0)} · ${i18n("toppedUp")} ${currency}${fmtMoney((prov as { toppedUp?: number }).toppedUp ?? 0)}` : ""}
               </span>
             </>

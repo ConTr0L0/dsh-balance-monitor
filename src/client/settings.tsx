@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ConfigValue, DayStat, History, ModelStat, Overview, RpcCall, SecretSlot } from "./api";
 import { t as i18n } from "./locales";
-import { MonthHeatmap, StackedBarChart, DonutChart, modelColor } from "./charts";
+import { MonthHeatmap, heatmapRange, StackedBarChart, DonutChart, modelColor } from "./charts";
 
 interface LimitDraft {
   enabled: boolean;
@@ -24,11 +24,12 @@ interface LimitDraft {
 interface Draft {
   enabled: boolean;
   refreshInterval: number;
-  providers: Record<string, { baseURL: string }>;
+  providers: Record<string, { baseURL: string; source: string }>;
   display: {
     provider: string;
     field: "total" | "available";
     visibleModels: string[];
+    knownModels: string[];
     showBalance: boolean;
     showToday: boolean;
     showRemaining: boolean;
@@ -48,19 +49,23 @@ const PROVIDER_LABELS: Record<string, string> = {
 };
 
 function toDraft(value: Record<string, unknown>): Draft {
-  const providersIn = (value.providers ?? {}) as Record<string, { baseURL?: string }>;
+  const providersIn = (value.providers ?? {}) as Record<string, { baseURL?: string; source?: string }>;
   const limitsIn = (value.limits ?? {}) as Record<string, { enabled?: boolean; value?: number; action?: string; showInSidebar?: boolean }>;
   const displayIn = (value.display ?? {}) as Record<string, unknown>;
   return {
     enabled: Boolean(value.enabled),
     refreshInterval: (value.refreshInterval as number) ?? 60,
     providers: Object.fromEntries(
-      PROVIDERS.map((id) => [id, { baseURL: providersIn[id]?.baseURL ?? "" }]),
+      PROVIDERS.map((id) => [
+        id,
+        { baseURL: providersIn[id]?.baseURL ?? "", source: providersIn[id]?.source ?? "auto" },
+      ]),
     ),
     display: {
       provider: String(displayIn.provider ?? "deepseek"),
       field: displayIn.field === "available" ? "available" : "total",
       visibleModels: Array.isArray(displayIn.visibleModels) ? displayIn.visibleModels.map(String) : [],
+      knownModels: Array.isArray(displayIn.knownModels) ? displayIn.knownModels.map(String) : [],
       showBalance: displayIn.showBalance !== false,
       showToday: displayIn.showToday !== false,
       showRemaining: displayIn.showRemaining !== false,
@@ -87,7 +92,7 @@ function toPatch(draft: Draft): Record<string, unknown> {
     enabled: draft.enabled,
     refreshInterval: draft.refreshInterval,
     providers: Object.fromEntries(
-      Object.entries(draft.providers).map(([id, entry]) => [id, { baseURL: entry.baseURL }]),
+      Object.entries(draft.providers).map(([id, entry]) => [id, { baseURL: entry.baseURL, source: entry.source }]),
     ),
     display: draft.display,
     limits: Object.fromEntries(
@@ -122,6 +127,7 @@ function syncAgo(overview: Overview | null): string {
 
 export function SettingsCard({ rpc }: { rpc: RpcCall }) {
   const [draft, setDraft] = useState<Draft | null>(null);
+  const draftRef = useRef<Draft | null>(null);
   const [secrets, setSecrets] = useState<SecretSlot[]>([]);
   const [revision, setRevision] = useState(0);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -131,6 +137,7 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
     const now = new Date();
     return { year: now.getFullYear(), month: now.getMonth() };
   });
+  const [heatDays, setHeatDays] = useState<30 | 90 | undefined>(undefined);
   const [rangeDays, setRangeDays] = useState<7 | 14 | 30>(7);
   const [errorDetail, setErrorDetail] = useState("");
   const saveTimer = useRef<number | null>(null);
@@ -146,7 +153,9 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
   const load = async () => {
     try {
       const config = await rpc<ConfigValue>("config/get");
-      setDraft(toDraft((config.value ?? {}) as Record<string, unknown>));
+      const nextDraft = toDraft((config.value ?? {}) as Record<string, unknown>);
+      draftRef.current = nextDraft;
+      setDraft(nextDraft);
       setSecrets(config.secrets ?? []);
       setRevision(config.revision);
       const overviewData = await rpc<Overview>("overview");
@@ -189,7 +198,11 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
   }, [rpc]);
 
   const mutate = (updater: (current: Draft) => Draft) => {
-    setDraft((current) => (current ? updater(current) : current));
+    const current = draftRef.current;
+    if (!current) return;
+    const next = updater(current);
+    draftRef.current = next;
+    setDraft(next);
     scheduleSave();
   };
 
@@ -200,9 +213,10 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
   };
 
   const save = async () => {
-    if (!draft) return;
+    const current = draftRef.current;
+    if (!current) return;
     try {
-      await rpc("config/patch", { patch: toPatch(draft), revision });
+      await rpc("config/patch", { patch: toPatch(current), revision });
       await refreshAfterWrite();
       setSaveState("saved");
     } catch (error) {
@@ -243,36 +257,61 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
     const next = new Date(statMonthYear.year, statMonthYear.month + delta, 1);
     setStatMonthYear({ year: next.getFullYear(), month: next.getMonth() });
   };
+  const { first: statStart, end: statEnd } = heatmapRange(statMonthYear.year, statMonthYear.month, 12, heatDays);
+  const heatDateLabel = (date: Date) => `${date.getFullYear()} / ${String(date.getMonth() + 1).padStart(2, "0")} / ${String(date.getDate()).padStart(2, "0")}`;
   const now = new Date();
   const statIsCurrent = statMonthYear.year === now.getFullYear() && statMonthYear.month === now.getMonth();
 
   const allModelIds = Object.keys(overview?.models ?? {});
   const visibleModels = draft.display.visibleModels;
-  const filteredModels = visibleModels.length > 0 ? visibleModels : allModelIds;
+  const newlyDiscoveredModels = allModelIds.filter((id) => !draft.display.knownModels.includes(id));
+  const filteredModels = visibleModels.length > 0
+    ? [...new Set([...visibleModels, ...newlyDiscoveredModels])]
+    : allModelIds;
   const toggleModel = (modelId: string) => {
     mutate((c) => {
-      const current = c.display.visibleModels;
-      const nextSet = new Set(current.length > 0 ? current : allModelIds);
+      const current = c.display.visibleModels.length > 0
+        ? [...c.display.visibleModels, ...newlyDiscoveredModels]
+        : allModelIds;
+      const nextSet = new Set(current);
       if (nextSet.has(modelId)) nextSet.delete(modelId);
       else nextSet.add(modelId);
-      return { ...c, display: { ...c.display, visibleModels: [...nextSet] } };
+      return {
+        ...c,
+        display: {
+          ...c.display,
+          visibleModels: [...nextSet],
+          knownModels: [...new Set([...c.display.knownModels, ...allModelIds])],
+        },
+      };
     });
   };
 
   return (
     <div className="bm-settings">
       <div className="bm-group bm-stats-group">
-        <span className="bm-group-title">{i18n("consumptionStats")}</span>
+        <div className="bm-stats-head">
+          <span className="bm-group-title">{i18n("consumptionStats")}</span>
+          <span className="bm-tabs">
+            {([30, 90, undefined] as const).map((days) => (
+              <button type="button" key={days ?? "year"} className="bm-tab"
+                data-active={heatDays === days || undefined} aria-pressed={heatDays === days}
+                onClick={() => setHeatDays(days)}>
+                {days ? days + " " + i18n("daysUnit") : i18n("heatYear")}
+              </button>
+            ))}
+          </span>
+        </div>
         <div className="bm-months">
           <button type="button" className="bm-iconbtn" onClick={() => shiftStatMonth(-1)} aria-label="previous">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M10 3.5L5.5 8l4.5 4.5" /></svg>
           </button>
-          <span>{statMonthYear.year} / {String(statMonthYear.month + 1).padStart(2, "0")}</span>
+          <span>{heatDateLabel(statStart)} — {heatDateLabel(statEnd)}</span>
           <button type="button" className="bm-iconbtn" onClick={() => shiftStatMonth(1)} disabled={statIsCurrent} aria-label="next">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 3.5l4.5 4.5L6 12.5" /></svg>
           </button>
         </div>
-        <MonthHeatmap daily={(history?.daily ?? {}) as Record<string, DayStat>} year={statMonthYear.year} month={statMonthYear.month} />
+        <MonthHeatmap daily={(history?.daily ?? {}) as Record<string, DayStat>} year={statMonthYear.year} month={statMonthYear.month} months={12} days={heatDays} />
         <span className="bm-note">{i18n("heatNote")}</span>
       </div>
 
@@ -344,21 +383,42 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
       <div className="bm-group bm-keys-card">
         <span className="bm-group-title">{i18n("providerKeys")}</span>
         {PROVIDERS.map((id) => (
-          <div className="bm-key-row" key={id}>
-            <span className="bm-key-name">{PROVIDER_LABELS[id]}</span>
-            <div className="bm-secret bm-secret-grow">
-              <input
-                className="bm-input"
-                type="password"
-                autoComplete="off"
-                placeholder={secretSet(id) ? i18n("keySet") : i18n("keyUnset")}
-                value=""
-                onChange={(event) => {
-                  if (event.target.value) queueSecret(id, event.target.value);
-                  event.target.value = "";
-                }}
-              />
+          <div className="bm-key-block" key={id}>
+            <div className="bm-key-row">
+              <span className="bm-key-name">{PROVIDER_LABELS[id]}</span>
+              <div className="bm-secret bm-secret-grow">
+                <input
+                  className="bm-input"
+                  type="password"
+                  autoComplete="off"
+                  placeholder={secretSet(id) ? i18n("keySet") : i18n("keyUnset")}
+                  value=""
+                  onChange={(event) => {
+                    if (event.target.value) queueSecret(id, event.target.value);
+                    event.target.value = "";
+                  }}
+                />
+              </div>
             </div>
+            {id === "deepseek" ? (
+              <div className="bm-field bm-source-field">
+                <label>{i18n("balanceSource")}</label>
+                <select
+                  className="bm-select"
+                  value={draft.providers[id]?.source ?? "auto"}
+                  onChange={(event) =>
+                    mutate((c) => ({
+                      ...c,
+                      providers: { ...c.providers, [id]: { ...c.providers[id], source: event.target.value } },
+                    }))
+                  }
+                >
+                  <option value="auto">{i18n("sourceAuto")}</option>
+                  <option value="account">{i18n("sourceAccount")}</option>
+                  <option value="key">{i18n("sourceKey")}</option>
+                </select>
+              </div>
+            ) : null}
           </div>
         ))}
         <span className="bm-note">{i18n("deepseekAutoKey")}</span>

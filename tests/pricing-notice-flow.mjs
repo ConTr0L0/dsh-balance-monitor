@@ -39,10 +39,10 @@ const setFetch = (html) => {
   globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => html });
 };
 
-/** Minimal host services: settings with live PrefsSchema values; connection RPC captured for direct calls. */
+/** Minimal host services: settings with live PrefsSchema values, and the fenced prefix route DSH 0.2 mounts. */
 function makeCtx() {
-  const handlers = new Map();
   const scope = { get: () => PrefsSchema({}), watch: () => () => {} };
+  let route = null;
   const ctx = {
     logger: { info() {}, warn() {}, error() {} },
     on: () => () => {},
@@ -50,13 +50,29 @@ function makeCtx() {
       const services = {};
       if (deps.includes("settings")) services.settings = { register: () => scope };
       if (deps.includes("credentials")) services.credentials = null;
-      if (deps.includes("connection")) services.connection = { rpc: { handle: (channel, handler) => { handlers.set(channel, handler); return () => {}; } } };
+      if (deps.includes("deepseekAccount")) services.deepseekAccount = null;
+      if (deps.includes("webServer")) services.webServer = { register: (candidate) => { route = candidate; return () => {}; } };
       callback(services);
       return () => {};
     },
     effect: () => () => {},
   };
-  return { ctx, call: async (endpoint, payload) => handlers.get("/dsh-balance-monitor")(endpoint, payload) };
+  const call = async (endpoint, payload) => {
+    const body = JSON.stringify(payload ?? {});
+    const req = {
+      method: "POST",
+      url: `/dsh-balance-monitor/${endpoint}`,
+      headers: { host: "127.0.0.1:19560", "content-type": "application/json" },
+      async *[Symbol.asyncIterator]() {
+        if (body !== "") yield Buffer.from(body);
+      },
+    };
+    let raw = "";
+    const res = { writeHead() {}, end(chunk) { raw = chunk ?? ""; } };
+    await route.handler(req, res);
+    return JSON.parse(raw);
+  };
+  return { ctx, call };
 }
 
 async function waitFor(label, probe, timeoutMs = 10_000) {

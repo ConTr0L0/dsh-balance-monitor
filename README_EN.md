@@ -4,7 +4,22 @@ English | [中文](README.md)
 
 A DeepSeek Harness plugin that shows your API account balance in real time in the left sidebar, with multi-provider balance detection, peak/off-peak pricing, per-session and daily cost tracking, and configurable spending limits. Works on both the web GUI and the desktop app (they run the same code).
 
-> **Compatibility**: 0.4.0 targets **DSH 0.2.0-rc.2**. On 0.1.x stay on 0.3.1.
+> **Compatibility**: 0.6.0 adds the full-page panel in the left rail; still **DSH 0.2.0-rc.2**. On 0.1.x stay on 0.3.1.
+
+## 0.6.0 — full-page panel in the left rail
+
+- **Entry point moved**: the balance monitor left DSH Settings for the left rail — a `sidebar.panellist` row ("Balance Monitor", among the Plugins / Usage-statistics entries) and a `main` keyed-slot entry of the same id render the panel **as a page** in the main area, exactly like the shipped Plugins page (`ctx.layout.selectPanel(id)` selects it, and the page carries a back control).
+- **No duplicate mount**: the Settings section is gone; the page reuses the very same `SettingsCard`, so the two can never drift apart.
+- **Rail position**: `order: 40` — after the shipped plugins (0) / task manager (10) and the installed usage-statistics panel (30).
+- New `tests/client-registration.mjs`: 24 assertions that load the REAL built `lib/client.js` the way the browser does (`window.__ModuleLoader__`) and check the row/key pairing, the injected `rpc`/`goBack` props, the back control's navigation (including a remembered panel whose slot was unregistered), and that both components render.
+
+## 0.5.0 — account-login balance
+
+- **Balance source**: DeepSeek balances can now come from the DSH account login — `ctx.deepseekAccount.getBalance()` reads the Platform wallets (recharge `normal_wallets` + granted `bonus_wallets`), so a signed-in user needs no API key.
+- **Source preference**: DSH Settings → Balance Monitor gains "DeepSeek balance source" = Automatic (signed-in account first, API key when signed out) / Account login only / API key only. The default stays Automatic, so existing key users see no change.
+- **No invented amounts**: signed out answers `null` and a failed query answers `failed`; both stay "unknown" rather than a zero balance, and an account-path failure never arms the fast retry loop (Platform queries default to a 30s timeout).
+- New `tests/account-balance.mjs` (wallet normalization + source selection, 31 checks) and `tests/account-login-flow.mjs` (the real host half driven through its RPC route, covering both credential paths and their fallbacks, 21 checks).
+- Repaired two tests still faking the removed `connection` RPC since the 0.4.0 port (`tests/balance-resilience.mjs`, `tests/pricing-notice-flow.mjs`) — they now drive the 0.2 prefix route, which restores the retry / stale-snapshot / non-retryable-401 coverage.
 
 ## 0.4.0 — DSH 0.2.0-rc.2 port
 
@@ -17,23 +32,27 @@ A DeepSeek Harness plugin that shows your API account balance in real time in th
 
 ## Features
 
+- **Full-page panel in the left rail**: the rail gains a "Balance Monitor" row (among the Plugins / Usage-statistics entries); clicking it opens the complete panel **as a page in the main area** (balance, usage, charts, limits and every setting), with a back control. Nothing is mounted twice in Settings any more.
 - **Sidebar widget** (above Settings): live balance (prominent), today's spend, limit progress, a subtle peak/off-peak dot, plus a manual refresh button when expanded. Each element is individually toggleable. When the sidebar is collapsed, the widget becomes a vertical capsule showing only the peak/off-peak status dot and the balance.
 - **Popover panel** (click the balance to open):
   - Provider switcher: DeepSeek / Zhipu GLM / OpenRouter / Tavily, with per-provider balance details (total / available / granted / topped-up …)
   - Today's spend, all-time spend, and per-limit progress bars
   - A 7-day spend bar chart
-  - A monthly calendar heatmap (one cell per day, darker = more spent; full history kept, month navigation)
+  - A daily stacked-token chart (7 / 14 / 30 days, filterable by model, covering providers in DSH logs)
+  - A usage heatmap (30 days / 90 days / 1 year; colored by priced DeepSeek spend, with amount and tokens on hover)
   - A per-session spend list (most recent first, with expandable details)
 - **Peak/off-peak pricing**: DeepSeek rules are built in — Beijing-time peak windows 09:00–12:00 and 14:00–18:00 on weekdays (excluding Chinese statutory holidays); weekends and Chinese statutory holidays are off-peak all day, at half price. **The price table is verified automatically from the official DeepSeek docs page and synced daily** (billing rules are plugin-managed, never user-entered); cost is computed per request using the exact model and request time. A built-in default table is used when the sync fails.
 - **Three spending limits**: daily amount / total amount / LLM request count — each with its own value, behavior when exceeded (warn only / warn and block), and an optional sidebar display. "Warn and block" intercepts subsequent LLM requests server-side through the `llm/stream` waterfall.
-- **API key management**: fill provider keys in DSH Settings → Balance Monitor (masked, write-only; values never reach the client); DeepSeek automatically reuses the DSH credential `DEEPSEEK_API_KEY` when left empty.
+- **API key management**: fill provider keys on the rail's "Balance Monitor" page (masked, write-only; values never reach the client).
+- **Account login, no key needed** (DeepSeek): when DSH is signed in to a DeepSeek account the balance is read from the account service `ctx.deepseekAccount.getBalance()` (Platform wallets: recharge + granted), so no API key is required. The settings page picks the source — Automatic (signed-in account first) / Account login only / API key only; Automatic falls back to the DSH credential `DEEPSEEK_API_KEY` when signed out.
 - **Refresh interval**: 5s / 30s / 60s.
 
 ## Supported providers
 
 | Provider | Endpoint | Notes |
 |---|---|---|
-| DeepSeek | `GET /user/balance` | CNY / USD, granted & topped-up shown |
+| DeepSeek (account login) | Platform `GET /api/v0/users/get_user_summary` via `ctx.deepseekAccount.getBalance()` | CNY / USD, recharge + granted; no API key when signed in |
+| DeepSeek (API key) | `GET /user/balance` | CNY / USD, granted & topped-up shown |
 | Zhipu GLM | `GET /api/paas/v4/users/me/balance` | CNY, available / voucher / cash |
 | OpenRouter | `GET /api/v1/credits` | USD credit (total / used / remaining) |
 | Tavily | `GET /usage` | Monthly usage & limits per endpoint class |
@@ -60,19 +79,19 @@ dsh plugin --profile web add link:C:/your/path/dsh-balance-monitor
 dsh plugin --profile web add dsh-balance-monitor
 ```
 
-After installing, **fully restart DSH** (Quit from the tray on desktop; refresh the page in the browser). A "Balance Monitor" section appears in DSH Settings.
+After installing, **fully restart DSH** (Quit from the tray on desktop; refresh the page in the browser). A "Balance Monitor" row appears in the left rail; clicking it opens the panel as a page in the main area.
 
 > `dsh plugin add` automatically appends the plugin to `dsh.profile.bundles`; if the bundle list was not updated, run `dsh plugin --profile web install`.
 
 ## Cost model
 
-- Source: DSH session logs (`$DSH_HOME/sessions/.../session.jsonl.zstd`), parsed incrementally. DSH writes the same session content into several session files (parent / child-session copies), so the plugin **deduplicates by the unique `assistant/message` `message.id`** before billing — without this, every completion is counted up to 6×.
+- Source: DSH session logs (`session.jsonl.zstd`, `session.v3.jsonl.zstd` and `session.v4.jsonl.zstd`), parsed incrementally. DSH writes the same session content into several session files (parent / child-session copies), so the plugin **deduplicates by the unique `assistant/message` `message.id`** before billing — without this, every completion is counted up to 6×.
 - Per LLM request: uncached input at the `input` rate, cache-hit input at the `cacheHit` rate, output at the `output` rate (all at peak rates, per 1M tokens). Current official table (2026-09-10 pricing page): `deepseek-flash` 0.04 / 2 / 8, `deepseek-v4-pro` 0.30 / 9 / 27. The usage fields are disjoint (`inputTokens` is the uncached part; `cacheReadTokens` is the cache-hit part).
 - Official notice: from Beijing time 2026-09-14 12:00 until V4.1 Pro launches, `deepseek-v4-pro` requests are routed to V4.1 Flash and billed at Flash prices — the plugin follows this switch by request timestamp; legacy model names and temp ids (e.g. `deepseek-v4.1-flash-expires-on-0910`) are all billed at Flash rates.
 - This billing rule was verified item-by-item against the DeepSeek platform daily bill (2026-08-22): flash within 0.3%, total within ~5% — the residual comes from failed/interrupted requests that are billed but never written to the session logs.
 - Requests inside a peak window are priced at the table rate; otherwise multiplied by the off-peak factor (0.5). **Current official rule (since 2026-09): peak windows are Beijing time Mon–Fri excluding Chinese statutory holidays, 09:00–12:00 & 14:00–18:00; everything else, including weekends and Chinese statutory holidays all day, is off-peak.** A weekend the State Council turns into a workday (调休上班) stays off-peak — the rule keys on the calendar weekend. Holiday dates are built in (`lib/holidays.js`, the 2026 State Council arrangement, refreshed once a year); the rule itself is still parsed automatically with the daily price sync.
-- Only `deepseek-official` traffic is counted (other gateways such as Aliyun/Zhipu/Xiaomi are excluded).
-- The price table is auto-verified daily from the official DeepSeek docs; unknown models fall back to built-in defaults (flash rates). No manual configuration needed.
+- **Model/token stats** include usage from every provider in DSH session logs. DeepSeek official API and DeepSeek account routes use DeepSeek's published price table; other providers are labeled `provider/model` and contribute tokens only. Existing logs are rescanned once after the update to backfill model history and price DeepSeek account-route usage.
+- The price table is auto-verified daily from the official DeepSeek docs; unknown DeepSeek models fall back to built-in defaults (flash rates). No manual configuration needed.
 
 ## Development
 
@@ -88,7 +107,7 @@ node build.mjs                 # bundles src/client → lib/client.js
 
 - `cordis.patch.yml`: bundle mount declaration (`insert` plugin row), kept in sync automatically by `dsh plugin add`.
 - `lib/index.js`: host half — session-log folding & billing, multi-provider balance polling, limit enforcement (`llm/stream` waterfall), RPC channel `/dsh-balance-monitor`.
-- `lib/client.js`: client bundle — registers the `sidebar.footer.action` (sidebar widget) and `settings.section` (settings card) slots.
+- `lib/client.js`: client bundle — registers `sidebar.panellist` (the rail's "Balance Monitor" row), `main` (the keyed page that row selects) and `sidebar.footer.action` (the sidebar widget).
 - State is stored at `$DSH_HOME/storages/dsh-balance-monitor/state.json` (atomic writes); preferences live in the DSH settings namespace `dsh-balance-monitor` (secrets masked).
 
 ## License
