@@ -4,6 +4,14 @@ English | [中文](README.md)
 
 A DeepSeek Harness plugin that shows your API account balance in real time in the left sidebar, with multi-provider balance detection, peak/off-peak pricing, per-session and daily cost tracking, and configurable spending limits. Works on both the web GUI and the desktop app (they run the same code).
 
+> **Compatibility**: 0.4.0 targets **DSH 0.2.0-rc.2** (0.2.0 removed the settings-namespace registry). On 0.1.x stay on 0.3.1.
+
+## 0.4.0 — DSH 0.2.0-rc.2 port
+
+- **Preferences are the plugin's own Config**: no more `settingsNamespace()` + `settings.register()`. Reads and writes are addressed by the **profile entry id** (`balance-monitor`) and persist through `settings.update(ns, patch, revision)` into the profile patch; secrets still leave the host only through DSH's `role("secret")` redaction.
+- **Client inject fixed**: dropped `@deepseek-ai/dsh-client-runtime`, which no longer exists in 0.2.0 — that entry is why the Plugins page showed the plugin as *abnormal / "this package contains no components"*. Peer ranges moved to `^0.2.0-rc.2`.
+- New `tests/settings-020-port.mjs`: 14 assertions over the settings projection, writes, `SETTINGS_CONFLICT` retry, and secret redaction.
+
 ## Features
 
 - **Sidebar widget** (above Settings): live balance (prominent), today's spend, limit progress, a subtle peak/off-peak dot, plus a manual refresh button when expanded. Each element is individually toggleable. When the sidebar is collapsed, the widget becomes a vertical capsule showing only the peak/off-peak status dot and the balance.

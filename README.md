@@ -4,6 +4,14 @@
 
 DSH（DeepSeek Harness）插件：在左侧任务栏实时显示 API 账户余额，支持多平台余额检测、峰谷计价、会话/每日消耗统计与可配置的消耗上限。同时适配 Web 端与桌面端（两者运行同一份代码）。
 
+> **兼容性**：0.4.0 起适配 **DSH 0.2.0-rc.2**（0.2.0 移除了 settings 命名空间注册表）。仍在 0.1.x 上请用 0.3.1。
+
+## 0.4.0 变更（DSH 0.2.0-rc.2 适配）
+
+- **偏好改挂插件自身 Config**：不再 `settingsNamespace()` + `settings.register()`，改为按 **profile 条目 id**（`balance-monitor`）读写，写入走 `settings.update(ns, patch, revision)`，落盘进 profile patch，重启保留；密钥仍由 DSH 按 `role("secret")` 脱敏后再出网。
+- **客户端 inject 修正**：删掉 0.2.0 已不存在的 `@deepseek-ai/dsh-client-runtime`（这是插件在插件页显示「异常 / 这个插件包不包含任何组件」的原因），peer 依赖同步到 `^0.2.0-rc.2`。
+- 新增 `tests/settings-020-port.mjs`：14 项断言覆盖 settings 投影、写入、`SETTINGS_CONFLICT` 重试与密钥脱敏。
+
 ## 功能
 
 - **侧边栏小组件**（设置按钮上方）：实时显示账户余额（醒目）、今日消耗、上限进度、峰谷状态小点；展开时带手动刷新按钮。显示内容可逐项开关。
@@ -53,6 +61,8 @@ dsh plugin --profile web add dsh-balance-monitor
 
 > `dsh plugin add` 会自动把插件追加进 profile 的 `dsh.profile.bundles`；若 bundle 未更新，补跑 `dsh plugin --profile web install`。
 
+> **桌面端注意**：DeepSeek Harness.exe 跑的是保留 profile `desktop`，CLI 拒绝管理它（报 `profile "desktop" is managed exclusively by the Electron application`）。装到桌面端请走应用内 **插件页 → Add plugin → 填本地目录路径**（如 `C:/DS/dsh-balance-monitor`）。
+
 ## 成本计算说明
 
 - 数据来源：DSH 会话日志（`$DSH_HOME/sessions/.../session.jsonl.zstd`），按次增量解析。DSH 会把同一会话内容写入多个 session 文件（父/子会话副本），插件按 `assistant/message` 的唯一 `message.id` 去重后再计费。
@@ -68,6 +78,13 @@ npm install --ignore-scripts   # 仅 esbuild 构建依赖
 node build.mjs                 # 打包 src/client → lib/client.js
 ```
 
+测试（无需 DSH 运行）：
+
+```bash
+node tests/settings-020-port.mjs    # 0.2 settings 投影 / 写入 / 冲突重试
+node --preserve-symlinks tests/host-apply-smoke.mjs   # host 半 + 会话计费
+```
+
 - 服务端（host 半）：`lib/*.js`，无构建步骤，改完即生效（重启 DSH）。
 - 客户端：`src/client/*`（React + TSX），改完需 `node build.mjs` 重新打包再重启。
 
@@ -76,7 +93,7 @@ node build.mjs                 # 打包 src/client → lib/client.js
 - `cordis.patch.yml`：bundle 挂载声明（`insert` 插件行），由 `dsh plugin add` 自动同步。
 - `lib/index.js`：服务端——会话日志折叠计费、多平台余额轮询、上限拦截（`llm/stream` waterfall）、RPC 通道 `/dsh-balance-monitor`。
 - `lib/client.js`：客户端 bundle——`sidebar.footer.action`（侧边栏组件）与 `settings.section`（设置卡片）两个插槽注册。
-- 数据存于 `$DSH_HOME/storages/dsh-balance-monitor/state.json`（原子写入）；偏好存于 DSH settings 命名空间 `dsh-balance-monitor`（密钥脱敏）。
+- 数据存于 `$DSH_HOME/storages/dsh-balance-monitor/state.json`（原子写入）；**偏好即本插件的 Config**（profile 条目 `balance-monitor`，由 DSH settings 投影成表单，密钥脱敏）。
 
 ## License
 
