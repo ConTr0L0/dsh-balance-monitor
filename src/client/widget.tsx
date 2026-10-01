@@ -159,7 +159,7 @@ export function SidebarWidget({ wide, rpc }: { wide: boolean; rpc: RpcCall }) {
 
   useEffect(() => {
     if (!rpc) return;
-    void refreshAll(rpc);
+    void manualRefresh(rpc);
     const timer = setInterval(() => void refreshAll(rpc), (overview?.refreshInterval ?? 60) * 1000);
     return () => clearInterval(timer);
   }, [rpc, overview?.refreshInterval]);

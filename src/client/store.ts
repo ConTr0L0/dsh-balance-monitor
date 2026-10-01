@@ -25,7 +25,10 @@ export const state: ClientState = {
   refreshedAt: 0,
 };
 
+let snapshot: ClientState = { ...state };
+
 function notify() {
+  snapshot = { ...state };
   for (const listener of [...listeners]) listener();
 }
 
@@ -37,7 +40,7 @@ export function subscribe(listener: Listener) {
 }
 
 export function getSnapshot() {
-  return state;
+  return snapshot;
 }
 
 let inflight: Promise<void> | null = null;

@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ConfigValue, DayStat, History, ModelStat, Overview, RpcCall, SecretSlot } from "./api";
 import { t as i18n } from "./locales";
-import { MonthHeatmap, heatmapRange, StackedBarChart, DonutChart, modelColor } from "./charts";
+import { MonthHeatmap, heatmapRange, StackedBarChart, DonutChart, fmtTokens, modelTokens } from "./charts";
 
 interface LimitDraft {
   enabled: boolean;
@@ -262,6 +262,27 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
   const now = new Date();
   const statIsCurrent = statMonthYear.year === now.getFullYear() && statMonthYear.month === now.getMonth();
 
+  const summaryModels = Object.entries(overview?.models ?? {});
+  const providerModels = summaryModels.reduce<Record<string, ModelStat>>((groups, [id, stat]) => {
+    const slash = id.indexOf("/");
+    const provider = slash < 0 ? "deepseek-official" : id.slice(0, slash);
+    const total = groups[provider] ??= { requests: 0, input: 0, cacheRead: 0, output: 0, cost: 0 };
+    total.requests += stat.requests;
+    total.input += stat.input;
+    total.cacheRead += stat.cacheRead;
+    total.output += stat.output;
+    total.cost += stat.cost;
+    return groups;
+  }, {});
+  const summaryTokens = summaryModels.reduce((sum, [, stat]) => sum + modelTokens(stat), 0);
+  const summaryPromptTokens = summaryModels.reduce((sum, [, stat]) => sum + stat.input + stat.cacheRead, 0);
+  const summaryCacheTokens = summaryModels.reduce((sum, [, stat]) => sum + stat.cacheRead, 0);
+  const summaryCacheRate = summaryPromptTokens > 0 ? (summaryCacheTokens / summaryPromptTokens * 100).toFixed(1) + "%" : "—";
+  const summaryActiveDays = Object.values(history?.daily ?? {}).filter((day) => day.requests > 0).length;
+  const mostUsedModel = summaryModels.reduce<[string, ModelStat] | null>(
+    (best, row) => !best || row[1].requests > best[1].requests ? row : best,
+    null,
+  );
   const allModelIds = Object.keys(overview?.models ?? {});
   const visibleModels = draft.display.visibleModels;
   const newlyDiscoveredModels = allModelIds.filter((id) => !draft.display.knownModels.includes(id));
@@ -302,6 +323,14 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
             ))}
           </span>
         </div>
+        <div className="bm-stats-summary">
+          <div><strong>{overview ? fmtTokens(summaryTokens) : "—"}</strong><span>{i18n("summaryTokens")}</span></div>
+          <div><strong>{typeof overview?.sessionCount === "number" ? overview.sessionCount.toLocaleString() : "—"}</strong><span>{i18n("summarySessions")}</span></div>
+          <div><strong>{overview ? overview.totals.requests.toLocaleString() : "—"}</strong><span>{i18n("summaryRequests")}</span></div>
+          <div><strong>{overview ? summaryCacheRate : "—"}</strong><span>{i18n("summaryCacheRate")}</span></div>
+          <div><strong>{history ? summaryActiveDays.toLocaleString() : "—"}</strong><span>{i18n("summaryActiveDays")}</span></div>
+          <div><strong className="bm-stats-summary-model" title={mostUsedModel?.[0] ?? "—"}>{mostUsedModel?.[0] ?? "—"}</strong><span>{i18n("summaryMostUsed")}</span></div>
+        </div>
         <div className="bm-months">
           <button type="button" className="bm-iconbtn" onClick={() => shiftStatMonth(-1)} aria-label="previous">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M10 3.5L5.5 8l4.5 4.5" /></svg>
@@ -332,28 +361,19 @@ export function SettingsCard({ rpc }: { rpc: RpcCall }) {
             ))}
           </span>
         </div>
-        <div className="bm-model-filter">
-          <span className="bm-card-label">{i18n("modelFilter")}</span>
-          {allModelIds.map((id) => (
-            <button
-              type="button"
-              key={id}
-              className="bm-filter-chip"
-              data-on={filteredModels.includes(id) || undefined}
-              onClick={() => toggleModel(id)}
-            >
-              <i style={{ background: modelColor(id) }} />{id}
-            </button>
-          ))}
-        </div>
         <div className="bm-stacked-card">
-          <StackedBarChart daily={(history?.daily ?? {}) as Record<string, DayStat>} days={rangeDays} visibleModels={filteredModels} />
+          <StackedBarChart daily={(history?.daily ?? {}) as Record<string, DayStat>} days={rangeDays} modelIds={allModelIds} visibleModels={filteredModels} onToggleModel={toggleModel} />
         </div>
       </div>
 
       <div className="bm-group">
         <span className="bm-group-title">{i18n("modelUsage")}</span>
         <DonutChart models={(overview?.models ?? {}) as Record<string, ModelStat>} visibleModels={filteredModels} />
+      </div>
+
+      <div className="bm-group">
+        <span className="bm-group-title">{i18n("providerUsage")}</span>
+        <DonutChart models={providerModels} />
       </div>
 
       <div className="bm-group">

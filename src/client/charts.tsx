@@ -3,6 +3,7 @@
  * per-model stacked daily bars, and a model-usage donut. Dependency-free and
  * theme-adaptive via CSS variables.
  */
+import { useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { t as i18n } from "./locales";
 import type { DayStat, ModelStat } from "./api";
@@ -146,7 +147,7 @@ export function MonthHeatmap({ daily, year, month, months = 1, days }: {
     );
   });
   return (
-    <div className="bm-heat-scroll" data-year={!days && months > 1 || undefined} data-days={days}>
+    <div className="bm-heat-scroll" data-year={!days && months > 1 || undefined} data-month={!days && months === 1 || undefined} data-days={days}>
       <div className="bm-heat-wrap" style={{ "--bm-heat-weeks": weeks, "--bm-heat-rows": rows } as CSSProperties}>
         <div className="bm-heat">{cells}</div>
         <div className="bm-heat-months">
@@ -162,24 +163,27 @@ export function MonthHeatmap({ daily, year, month, months = 1, days }: {
 }
 
 /** Daily model stacks with a matching token axis and cache-hit-rate line. */
-export function StackedBarChart({ daily, days, visibleModels }: {
+export function StackedBarChart({ daily, days, modelIds, visibleModels, onToggleModel }: {
   daily: Record<string, DayStat>;
   days: number;
+  modelIds: string[];
   visibleModels?: string[];
+  onToggleModel: (modelId: string) => void;
 }) {
+  const [hoveredModel, setHoveredModel] = useState<string | null>(null);
   const today = new Date();
   const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (days - 1));
-  const modelIds = [...new Set(Object.values(daily).flatMap(entry => Object.keys(entry.models ?? {})))]
-    .filter(id => visibleModels === undefined || visibleModels.includes(id));
+  const isModelVisible = (id: string) => visibleModels === undefined || visibleModels.length === 0 || visibleModels.includes(id);
+  const activeHoveredModel = hoveredModel !== null && isModelVisible(hoveredModel) ? hoveredModel : null;
   const buckets: { key: string; label: string; values: number[]; total: number; rate: number | null }[] = [];
   let max = 0;
   for (let i = 0; i < days; i += 1) {
     const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
     const key = dayKeyOf(date);
     const entry = daily[key];
-    const values = modelIds.map(id => modelTokens(entry?.models?.[id]));
+    const values = modelIds.map(id => isModelVisible(id) ? modelTokens(entry?.models?.[id]) : 0);
     const total = values.reduce((sum, value) => sum + value, 0);
-    const cached = modelIds.reduce((sum, id) => sum + (entry?.models?.[id]?.cacheRead ?? 0), 0);
+    const cached = modelIds.reduce((sum, id) => sum + (isModelVisible(id) ? entry?.models?.[id]?.cacheRead ?? 0 : 0), 0);
     max = Math.max(max, total);
     buckets.push({ key, label: dayLabel(date), values, total, rate: total > 0 ? Math.min(1, cached / total) : null });
   }
@@ -209,7 +213,17 @@ export function StackedBarChart({ daily, days, visibleModels }: {
                 <div className="bm-chart-col" key={bucket.key} data-tip={`${bucket.key} · ${fmtChartTokens(bucket.total)} tokens · ${i18n("cacheHitRate")} ${bucket.rate === null ? "—" : Math.round(bucket.rate * 100) + "%"}`}>
                   <div className="bm-stack-area">
                     {bucket.total > 0 && <span className="bm-stack" style={{ height: `${height}%` }}>
-                      {bucket.values.map((value, modelIndex) => value > 0 ? <i key={modelIds[modelIndex]} style={{ height: `${value / bucket.total * 100}%`, background: modelColor(modelIds[modelIndex]) }} /> : null)}
+                      {bucket.values.map((value, modelIndex) => {
+                        const modelId = modelIds[modelIndex];
+                        return value > 0 ? (
+                          <i
+                            key={modelId}
+                            data-highlight={activeHoveredModel === modelId || undefined}
+                            data-dim={activeHoveredModel !== null && activeHoveredModel !== modelId || undefined}
+                            style={{ height: (value / bucket.total * 100) + "%", background: modelColor(modelId) }}
+                          />
+                        ) : null;
+                      })}
                     </span>}
                     {days <= 14 && bucket.total > 0 && <span className="bm-chart-value" style={{ bottom: `calc(${height}% + 3px)` }}>{fmtChartTokens(bucket.total)}</span>}
                   </div>
@@ -223,8 +237,22 @@ export function StackedBarChart({ daily, days, visibleModels }: {
           {[100, 75, 50, 25, 0].map((value, index) => <span key={value}>{value}%</span>)}
         </div>
       </div>
-      <div className="bm-legend bm-stacked-legend">
-        {modelIds.map(id => <span key={id}><i style={{ background: modelColor(id) }} />{id}</span>)}
+      <div className="bm-legend bm-stacked-legend" role="group" aria-label={i18n("modelFilter")}>
+        {modelIds.map(id => (
+          <button
+            type="button"
+            key={id}
+            aria-pressed={isModelVisible(id)}
+            data-on={isModelVisible(id) || undefined}
+            onClick={() => onToggleModel(id)}
+            onPointerEnter={() => setHoveredModel(id)}
+            onPointerLeave={() => setHoveredModel(null)}
+            onFocus={() => setHoveredModel(id)}
+            onBlur={() => setHoveredModel(null)}
+          >
+            <i style={{ background: modelColor(id) }} />{id}
+          </button>
+        ))}
         <span><i className="bm-cache-key" />{i18n("cacheHitRate")}</span>
       </div>
     </div>
@@ -236,6 +264,7 @@ export function StackedBarChart({ daily, days, visibleModels }: {
  * @param visibleModels - optional model-id whitelist (empty = all).
  */
 export function DonutChart({ models, visibleModels }: { models: Record<string, ModelStat>; visibleModels?: string[] }) {
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const rows = Object.entries(models)
     .map(([id, stat]) => ({ id, tokens: modelTokens(stat), cost: stat.cost }))
     .filter((row) => row.tokens > 0)
@@ -265,10 +294,15 @@ export function DonutChart({ models, visibleModels }: { models: Record<string, M
             cy="50"
             r={R}
             fill="none"
+            className="bm-donut-segment"
             stroke={seg.color}
-            strokeWidth="12"
+            strokeWidth={hoveredId === seg.id ? 16 : 12}
             strokeDasharray={`${seg.length} ${C - seg.length}`}
             strokeDashoffset={-seg.offset}
+            data-active={hoveredId === seg.id || undefined}
+            data-dim={hoveredId !== null && hoveredId !== seg.id || undefined}
+            onMouseEnter={() => setHoveredId(seg.id)}
+            onMouseLeave={() => setHoveredId(null)}
           />
         ))}
         <text x="50" y="48" textAnchor="middle" className="bm-donut-total">{fmtTokens(total)}</text>
@@ -276,8 +310,17 @@ export function DonutChart({ models, visibleModels }: { models: Record<string, M
       </svg>
       <div className="bm-legend bm-legend-col">
         {rows.map((row) => (
-          <div className="bm-legend-row" key={row.id}>
-            <span className="bm-legend-name"><i style={{ background: modelColor(row.id) }} />{row.id}</span>
+          <div
+            className="bm-legend-row"
+            key={row.id}
+            data-active={hoveredId === row.id || undefined}
+            tabIndex={0}
+            onMouseEnter={() => setHoveredId(row.id)}
+            onMouseLeave={() => setHoveredId(null)}
+            onFocus={() => setHoveredId(row.id)}
+            onBlur={() => setHoveredId(null)}
+          >
+            <span className="bm-legend-name" title={row.id}><i style={{ background: modelColor(row.id) }} />{row.id}</span>
             <span className="bm-legend-num">{fmtTokens(row.tokens)} <small>{total > 0 ? ((row.tokens / total) * 100).toFixed(1) : 0}%</small></span>
           </div>
         ))}

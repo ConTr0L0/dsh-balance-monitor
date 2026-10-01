@@ -104,6 +104,7 @@ export interface Overview {
   };
   today: DayStat;
   totals: { cost: number; requests: number };
+  sessionCount: number;
   models: Record<string, ModelStat>;
   lastEventAt: number;
   limits: LimitRow[];
